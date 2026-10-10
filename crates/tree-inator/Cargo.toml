@@ -1,0 +1,12 @@
+[package]
+name = "tree-inator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+forest-core = { path = "../forest-core" }
+eframe = { version = "0.36", default-features = false, features = ["wgpu", "default_fonts"] }
+serde.workspace = true
+serde_json.workspace = true
+image = { workspace = true, features = ["jpeg", "webp", "bmp", "tiff"] }
+rfd = "0.17"
