@@ -1,7 +1,12 @@
 mod background;
+mod compare;
+mod icons;
+mod selftest;
 mod panel;
 mod simple;
 mod theme_cards;
+mod tools;
+mod tuning;
 mod zones;
 
 use crate::worker::{self, Job, Msg, Variants};
@@ -14,32 +19,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool {
-    Lasso,
-    LassoCut,
-    Polygon,
-    PolygonCut,
-    Pan,
-    /// Select and edit the drawn zones.
-    Zones,
-    TreeBrush,
-    TreeStamp,
-    TreeErase,
-}
-
-impl Tool {
-    fn is_brush(self) -> bool {
-        matches!(self, Tool::TreeBrush | Tool::TreeStamp | Tool::TreeErase)
-    }
-
-    fn op(self) -> ShapeOp {
-        match self {
-            Tool::LassoCut | Tool::PolygonCut => ShapeOp::Subtract,
-            _ => ShapeOp::Add,
-        }
-    }
-}
+use tools::{BgPixels, LineUse, Mode, RowId, Tool};
 
 /// Everything the user edits by hand, for undo.
 #[derive(Clone)]
@@ -48,14 +28,6 @@ struct Snap {
     groups: Vec<Group>,
     painted: Vec<TreeRec>,
     erased: Vec<[f32; 3]>,
-}
-
-/// Percent slider for a 0..1 value.
-fn pct_slider(ui: &mut egui::Ui, v: &mut f32, max: f32, name: &str, tip: &str) {
-    let mut p = *v * 100.0;
-    if ui.add(egui::Slider::new(&mut p, 0.0..=max).suffix("%").text(name)).on_hover_text(tip).changed() {
-        *v = p / 100.0;
-    }
 }
 
 /// A self test run from the environment: TREE_INATOR_OPEN project.json, TREE_INATOR_ZOOM 1.0 and
@@ -140,6 +112,7 @@ pub struct TreeApp {
 
     export_scale: f32,
     variants: Variants,
+    export_format: forest_core::render::ExportFormat,
     /// The window's GPU renderer, when the graphics backend allows it.
     gpu: Option<Arc<forest_core::gpu::Gpu>>,
     render_state: Option<eframe::egui_wgpu::RenderState>,
@@ -167,10 +140,46 @@ pub struct TreeApp {
     /// The layer picked in the layers list, whose settings the panel edits.
     group_sel: Option<u32>,
     prev_zone_sel: Option<usize>,
-    bg_rx: Option<Receiver<Result<background::Tiles, String>>>,
+    bg_rx: Option<Receiver<Result<(background::Tiles, BgPixels), String>>>,
     zone_sel: Option<usize>,
     search: String,
+    /// Drawing tool state.
+    mode: Mode,
+    snap: bool,
+    draw_smooth: f32,
+    wand_tol: f32,
+    wand_contiguous: bool,
+    wand_preview: Option<(Instant, [i32; 2], Vec<Vec<Vec<[f32; 2]>>>)>,
+    line_width: f32,
+    line_use: LineUse,
+    line_spacing: f32,
+    grow_px: f32,
+    /// Zones picked in addition to `zone_sel`, for combining them.
+    zone_multi: Vec<usize>,
+    /// The row shown on its own, ignoring what else is visible.
+    solo: Option<RowId>,
+    renaming: Option<RowId>,
+    row_drag: Option<RowId>,
+    row_drop: Option<(RowId, RowId)>,
+    bg_pixels: Option<BgPixels>,
+    /// Calibrating the map's scale: two points a known distance apart.
+    calib: Vec<[f32; 2]>,
+    calibrating: bool,
+    calib_metres: f32,
+    settings_clip: Option<(GenParams, Vec<Species>)>,
+    selftest_done: bool,
+    selftest_log: Vec<String>,
+    /// The tab of the tuning panel, and which tabs have their Fine Tuning open.
+    tab: tuning::Tab,
+    /// Compare mode: a snapshot on the left of a divider, the live picture on the right.
+    compare: bool,
+    snapshot: Option<compare::Snapshot>,
+    split: f32,
+    fine_open: [bool; 8],
     theme_tex: std::collections::HashMap<&'static str, egui::TextureHandle>,
+    species_tex: std::collections::HashMap<String, egui::TextureHandle>,
+    /// The species open in the editor window, if any.
+    species_edit: Option<usize>,
     zone_drag: Option<zones::ZoneDrag>,
     /// Self test: open a project, set a zoom, save the app's own frame to a PNG and quit.
     shot: Option<Shot>,
@@ -243,6 +252,7 @@ impl TreeApp {
             selected_layer: LayerKind::Canopy.index(),
             export_scale: 1.0,
             variants: Variants { main: true, no_shadow: false, shadow_only: false },
+            export_format: forest_core::render::ExportFormat::Png,
             theme: None,
             gpu,
             render_state,
@@ -263,8 +273,37 @@ impl TreeApp {
             prev_zone_sel: None,
             bg_rx: None,
             zone_sel: None,
-            search: String::new(),
+            search: std::env::var("TREE_INATOR_SEARCH").unwrap_or_default(),
+            mode: Mode::Add,
+            snap: true,
+            draw_smooth: 0.4,
+            wand_tol: 32.0,
+            wand_contiguous: true,
+            wand_preview: None,
+            line_width: 24.0,
+            line_use: LineUse::Cut,
+            line_spacing: 18.0,
+            grow_px: 20.0,
+            zone_multi: Vec::new(),
+            solo: None,
+            renaming: None,
+            row_drag: None,
+            row_drop: None,
+            bg_pixels: None,
+            calib: Vec::new(),
+            calibrating: false,
+            calib_metres: 100.0,
+            settings_clip: None,
+            selftest_done: false,
+            selftest_log: Vec::new(),
+            tab: tuning::Tab::from_env(),
+            compare: std::env::var_os("TREE_INATOR_COMPARE").is_some(),
+            snapshot: None,
+            split: 0.5,
+            fine_open: [std::env::var_os("TREE_INATOR_FINE").is_some(); 8],
             theme_tex: Default::default(),
+            species_tex: Default::default(),
+            species_edit: None,
             zone_drag: None,
             shot: Shot::from_env(),
             visible: None,
@@ -291,6 +330,26 @@ impl TreeApp {
 
     /// The project as it is saved and rendered: while the panel shows a layer or group, the project settings
     /// are the ones put aside.
+    /// What the preview draws: the project, or with a row on solo only that row's zones.
+    fn preview_project(&self) -> Project {
+        let mut p = self.real_project();
+        let Some(solo) = self.solo else { return p };
+        let keep: Vec<usize> = match solo {
+            RowId::Zone(i) => vec![i],
+            RowId::Group(g) => {
+                let mut ids = p.descendants(g);
+                ids.push(g);
+                (0..p.shapes.len()).filter(|&i| p.zone_group(&p.shapes[i]).is_some_and(|z| ids.contains(&z))).collect()
+            }
+        };
+        for (i, z) in p.shapes.iter_mut().enumerate() {
+            if !keep.contains(&i) {
+                z.visible = false;
+            }
+        }
+        p
+    }
+
     fn real_project(&self) -> Project {
         let mut p = self.project.clone();
         if self.edit_node.is_some() {
@@ -322,7 +381,7 @@ impl TreeApp {
         }
         let Some(id) = self.editing_node() else {
             self.gen_base = None;
-            self.settings_panel(ui);
+            self.tuning_panel(ui);
             return;
         };
         let (gen, species) = self.project.effective(id);
@@ -341,7 +400,7 @@ impl TreeApp {
         ui.small(format!("{who} A dot marks a setting changed here. Light, grading and map size are shared. Pick a zone in no group to edit the project."));
         ui.separator();
 
-        self.settings_panel(ui);
+        self.tuning_panel(ui);
 
         // put the project back, and keep on the node what the user changed
         self.edit_node = None;
@@ -515,7 +574,7 @@ impl TreeApp {
         }
 
         // Detect edits by comparing serialised state. Cheap at these sizes and never misses a widget.
-        let gen_key = format!("{}{}", self.project.render_key(), self.paint_rev);
+        let gen_key = format!("{}{}{:?}", self.project.render_key(), self.paint_rev, self.solo);
         if gen_key != self.gen_key {
             self.gen_key = gen_key;
             self.gen_dirty = true;
@@ -543,9 +602,9 @@ impl TreeApp {
             self.rendering = true;
             if self.gpu.is_some() {
                 let (scale, view) = self.wanted_view();
-                let _ = self.tx.send(Job::View { project: self.real_project(), scale, view, id: self.job_id });
+                let _ = self.tx.send(Job::View { project: self.preview_project(), scale, view, id: self.job_id });
             } else {
-                let _ = self.tx.send(Job::Preview { project: self.real_project(), scale: self.preview_scale, id: self.job_id });
+                let _ = self.tx.send(Job::Preview { project: self.preview_project(), scale: self.preview_scale, id: self.job_id });
             }
         } else if self.gen_dirty {
             ctx.request_repaint_after(Duration::from_millis(130));
@@ -706,9 +765,29 @@ impl TreeApp {
         if esc {
             self.stroke.clear();
         }
-        if enter && matches!(self.tool, Tool::Polygon | Tool::PolygonCut) {
+        if enter && matches!(self.tool, Tool::Polygon) {
             let pts = std::mem::take(&mut self.stroke);
-            self.add_shape(pts, self.tool.op());
+            self.finish_polygon(pts, ctx);
+        }
+        if enter && self.tool == Tool::Line {
+            self.finish_line();
+        }
+        // tool keys and the species keys
+        let (tool, number) = ctx.input(|i| {
+            if i.modifiers.command || i.modifiers.alt {
+                return (None, None);
+            }
+            let t = Tool::ALL.iter().find_map(|_| None::<Tool>).or_else(|| {
+                [Key::V, Key::L, Key::P, Key::W, Key::N, Key::B, Key::T, Key::E, Key::M, Key::H].into_iter().find(|k| i.key_pressed(*k)).and_then(Tool::from_key)
+            });
+            let n = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9].iter().position(|k| i.key_pressed(*k));
+            (t, n)
+        });
+        if let Some(t) = tool {
+            self.set_tool(t);
+        }
+        if let Some(n) = number {
+            self.species_key(n);
         }
     }
 
@@ -763,10 +842,12 @@ impl TreeApp {
     }
 
     fn export(&mut self) {
-        let Some(path) = rfd::FileDialog::new().add_filter("PNG", &["png"]).set_file_name("forest.png").save_file() else {
+        let fmt = self.export_format;
+        let ext = fmt.extension().unwrap_or("png");
+        let Some(path) = rfd::FileDialog::new().add_filter(fmt.label(), &[ext]).set_file_name(format!("forest.{ext}")).save_file() else {
             return;
         };
-        let _ = self.tx.send(Job::Export { project: self.real_project(), scale: self.export_scale, path, variants: self.variants });
+        let _ = self.tx.send(Job::Export { project: self.real_project(), scale: self.export_scale, path, variants: self.variants, format: fmt });
         self.status = "Exporting...".into();
     }
 
@@ -794,376 +875,37 @@ impl TreeApp {
                 self.redo();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Export PNG").clicked() {
+                if ui.button("Export").clicked() {
                     self.export();
                 }
-            });
-        });
-    }
-
-    /// One full-width tool button.
-    fn tool_button(&mut self, ui: &mut egui::Ui, tool: Tool, label: &str) {
-        let on = self.tool == tool;
-        if ui.add_sized([ui.available_width(), 26.0], egui::Button::new(label).selected(on)).clicked() {
-            self.tool = tool;
-            self.stroke.clear();
-        }
-    }
-
-    fn tool_panel(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.label(egui::RichText::new("DRAW FOREST").small().weak());
-            self.tool_button(ui, Tool::Lasso, "Lasso: add");
-            self.tool_button(ui, Tool::LassoCut, "Lasso: cut clearing");
-            self.tool_button(ui, Tool::Polygon, "Polygon: add");
-            self.tool_button(ui, Tool::PolygonCut, "Polygon: cut");
-            self.tool_button(ui, Tool::Zones, "Edit zones");
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("PAINT TREES").small().weak());
-            self.tool_button(ui, Tool::TreeBrush, "Tree brush");
-            self.tool_button(ui, Tool::TreeStamp, "Single tree");
-            self.tool_button(ui, Tool::TreeErase, "Tree eraser");
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("VIEW").small().weak());
-            self.tool_button(ui, Tool::Pan, "Pan");
-            ui.add_space(4.0);
-            let hint = match self.tool {
-                Tool::Lasso => "Drag a loop around the area. The forest grows when you let go.",
-                Tool::LassoCut => "Drag a loop to cut an opening in the forest.",
-                Tool::Polygon => "Click corners. Enter or right click closes the shape.",
-                Tool::PolygonCut => "Click corners of a clearing. Enter or right click closes it.",
-                Tool::Pan => "Drag to move the map.",
-                Tool::Zones => "Click a zone to select it. Drag its corners or the zone itself. Double click an edge to add a corner, right click a corner to remove it. Delete removes the zone.",
-                Tool::TreeBrush => "Drag to scatter trees. [ and ] change brush size.",
-                Tool::TreeStamp => "Click to place one tree.",
-                Tool::TreeErase => "Drag over trees to remove them.",
-            };
-            ui.small(hint);
-            ui.small("Middle drag or Space+drag pans. Wheel zooms.");
-            if self.tool.is_brush() {
-                ui.separator();
-                self.sec_brush(ui);
-            }
-            ui.separator();
-
-            egui::CollapsingHeader::new("Map and view").default_open(true).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Map size");
-                    ui.add(egui::DragValue::new(&mut self.map_size_edit[0]).range(64..=16384));
-                    ui.label("x");
-                    ui.add(egui::DragValue::new(&mut self.map_size_edit[1]).range(64..=16384));
-                });
-                if ui.button("Apply size").on_hover_text("Use the pixel size of the map you will place the forest on").clicked() {
-                    self.project.map_w = self.map_size_edit[0];
-                    self.project.map_h = self.map_size_edit[1];
-                    self.fit_pending = true;
+                let can = self.gpu.is_some();
+                if ui.add_enabled(can, egui::Button::new("Compare").selected(self.compare)).on_hover_text("Split the map: a snapshot on the left, what you are editing on the right").on_disabled_hover_text("Compare needs the GPU preview").clicked() {
+                    self.compare = !self.compare;
+                    if self.compare {
+                        self.take_snapshot();
+                    } else {
+                        self.free_snapshot();
+                    }
                 }
-                ui.horizontal(|ui| {
-                    if ui.button("Fit (F)").clicked() {
-                        self.fit_pending = true;
-                    }
-                    let mut z = self.zoom * 100.0;
-                    if ui.add(egui::DragValue::new(&mut z).range(1.0..=800.0).speed(0.5).suffix("%")).changed() {
-                        self.zoom = z / 100.0;
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Background");
-                    ui.color_edit_button_rgb(&mut self.background);
-                });
-                ui.checkbox(&mut self.show_outlines, "Show outlines");
-                self.background_ui(ui);
             });
-            ui.separator();
-            self.zones_ui(ui);
-            ui.separator();
-            if ui.button("Clear painted trees").clicked() && !(self.project.painted.is_empty() && self.project.erased.is_empty()) {
-                self.push_undo();
-                self.project.painted.clear();
-                self.project.erased.clear();
-                self.paint_rev += 1;
-            }
         });
     }
 
     // ---------------------------------------------------------------- tabs
 
     #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_size(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("Size").default_open(true).show(ui, |ui| {
-            let g = &mut self.project.gen;
-            let mut pct = g.scale * 100.0;
-            if ui.add(egui::Slider::new(&mut pct, 10.0..=400.0).logarithmic(true).suffix("%").text("Forest scale"))
-                .on_hover_text("Makes every tree, leaf, shrub and shadow bigger or smaller on the same drawn area. Use more for higher elevations.")
-                .changed()
-            {
-                g.scale = pct / 100.0;
-            }
-            ui.horizontal(|ui| {
-                for v in [25.0, 50.0, 100.0, 200.0, 400.0] {
-                    if ui.small_button(format!("{v:.0}%")).clicked() {
-                        g.scale = v / 100.0;
-                    }
-                }
-            });
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_patch_shape(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("Patch shape").default_open(true).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Generate patch").on_hover_text("Random natural outline in the middle of the map").clicked() {
-                    self.generate_patch();
-                }
-                if ui.button("Fill map").clicked() {
-                    self.fill_map();
-                }
-            });
-            let g = &mut self.project.gen;
-            egui::ComboBox::from_label("Preset").selected_text("Apply...").show_ui(ui, |ui| {
-                for (name, f) in PRESETS {
-                    if ui.selectable_label(false, *name).clicked() {
-                        f(g);
-                    }
-                }
-            });
-            egui::ComboBox::from_label("Pattern").selected_text(g.pattern.name()).show_ui(ui, |ui| {
-                for p in Pattern::ALL {
-                    ui.selectable_value(&mut g.pattern, p, p.name());
-                }
-            });
-            ui.add(egui::Slider::new(&mut g.pattern_strength, 0.0..=1.0).text("Strength"));
-            ui.add(egui::Slider::new(&mut g.pattern_scale, 50.0..=1000.0).text("Pattern size"));
-            if g.pattern == Pattern::Branching {
-                ui.add(egui::Slider::new(&mut g.branch_width, 0.05..=1.0).text("Branch width"));
-            }
-            ui.separator();
-            ui.checkbox(&mut g.contain, "Fit the whole forest inside the drawn area")
-                .on_hover_text("Pulls the generation in so its fall-off, grass fringe and stray trees all end before the line you drew. Painted trees are exempt.");
-            ui.add_enabled_ui(g.contain, |ui| {
-                let mut pct = g.contain_fit * 100.0;
-                if ui.add(egui::Slider::new(&mut pct, 0.0..=200.0).suffix("%").text("Pull in"))
-                    .on_hover_text("100% pulls in exactly as far as needed. More leaves a margin, less lets the fringe reach the line.")
-                    .changed()
-                {
-                    g.contain_fit = pct / 100.0;
-                }
-                if let Some((fit, _)) = &self.render_info {
-                    ui.small(format!("Pulled in by {:.0} px", fit));
-                }
-                ui.checkbox(&mut g.contain_clip, "Trim anything still crossing the line")
-                    .on_hover_text("A safety net. Turn off to keep the pulled-in edge fully natural.");
-                ui.checkbox(&mut g.contain_shadows, "Keep shadows inside too")
-                    .on_hover_text("Off lets shadows fall outside the area, the way a real forest's would");
-            });
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_edges(&mut self, ui: &mut egui::Ui) {
-        let g = &mut self.project.gen;
-        egui::CollapsingHeader::new("Edges").default_open(true).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Seed");
-                ui.add(egui::DragValue::new(&mut g.seed));
-                if ui.button("Reroll (R)").clicked() {
-                    g.seed = (g.seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)) % 1_000_000;
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.radio_value(&mut g.edge_mode, EdgeMode::Realistic, "Realistic");
-                ui.radio_value(&mut g.edge_mode, EdgeMode::Blurred, "Blurred");
-            });
-            if g.edge_mode == EdgeMode::Blurred {
-                ui.add(egui::Slider::new(&mut g.feather, 0.05..=1.0).text("Feather"));
-            }
-            ui.add(egui::Slider::new(&mut g.shape_softness, 5.0..=200.0).text("Outline softness"));
-            ui.add(egui::Slider::new(&mut g.edge_warp, 0.0..=300.0).text("Outline warp"));
-            ui.add(egui::Slider::new(&mut g.edge_noise, 0.0..=0.6).text("Outline noise"));
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_canopy(&mut self, ui: &mut egui::Ui) {
-        let g = &mut self.project.gen;
-        egui::CollapsingHeader::new("Canopy").default_open(true).show(ui, |ui| {
-            ui.add(egui::Slider::new(&mut g.canopy_cover, 0.05..=1.0).text("Coverage"));
-            ui.add(egui::Slider::new(&mut g.canopy_patch_size, 30.0..=500.0).text("Patch size"));
-            ui.add(egui::Slider::new(&mut g.canopy_edge_depth, 0.0..=1.0).text("Edge thinning"));
-            ui.add(egui::Slider::new(&mut g.crown_min, 3.0..=40.0).text("Crown min radius"));
-            ui.add(egui::Slider::new(&mut g.crown_max, 4.0..=60.0).text("Crown max radius"));
-            ui.add(egui::Slider::new(&mut g.gaps, 0.0..=1.0).text("Treefall gaps"));
-            ui.add(egui::Slider::new(&mut g.gap_size, 10.0..=120.0).text("Gap size"));
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_undergrowth_and_fringe(&mut self, ui: &mut egui::Ui) {
-        let g = &mut self.project.gen;
-        egui::CollapsingHeader::new("Undergrowth and fringe").default_open(false).show(ui, |ui| {
-            ui.add(egui::Slider::new(&mut g.grass_reach, 0.0..=1.0).text("Grass reach"));
-            ui.add(egui::Slider::new(&mut g.grass_density, 0.0..=3.0).text("Grass density"));
-            ui.add(egui::Slider::new(&mut g.shrub_density, 0.0..=3.0).text("Shrubs"));
-            ui.add(egui::Slider::new(&mut g.lone_groups, 0.0..=5.0).text("Lone tree groups"));
-            ui.add(egui::Slider::new(&mut g.lone_reach, 0.0..=1.0).text("Lone tree reach"));
-            ui.add(egui::Slider::new(&mut g.interior_lone, 0.0..=1.0).text("Lone trees inside"));
-            ui.add(egui::Slider::new(&mut g.pebbles, 0.0..=5.0).text("Pebble shrubs"));
-            ui.add(egui::Slider::new(&mut g.haze_reach, 0.1..=1.0).text("Haze reach"));
-            ui.add(egui::Slider::new(&mut g.haze_opacity, 0.0..=0.8).text("Haze opacity"));
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_forest_type(&mut self, ui: &mut egui::Ui) {
-        // With procedural trees on, lists show only species that have a tree type, labelled with it.
-        let all = self.project.gen.procedural_forms;
-        let names: Vec<String> = self
-            .project
-            .species
-            .iter()
-            .map(|s| match s.tree_type(all) {
-                Some(t) => format!("{} ({})", s.name, treegen_sprite::tree_type_label(t)),
-                None => s.name.clone(),
-            })
-            .collect();
-        let shown: Vec<usize> = (0..names.len()).filter(|&i| !forest_core::mushrooms::is_mushroom(&self.project.species[i].preset) && (!all || self.project.species[i].tree_type(true).is_some())).collect();
-        let name_of = |i: usize| names.get(i).cloned().unwrap_or_else(|| "?".into());
-
-        egui::CollapsingHeader::new("Forest type").default_open(true).show(ui, |ui| {
-            let g = &mut self.project.gen;
-            ui.checkbox(&mut g.procedural_forms, "Procedural trees")
-                .on_hover_text("Grow every species as its procedural tree type. Lists then show only those species.");
-            ui.label("What the generated forest is made of");
-            egui::ComboBox::from_label("Canopy and lone trees").selected_text(name_of(g.main_species as usize)).show_ui(ui, |ui| {
-                for &i in &shown {
-                    let n = &names[i];
-                    ui.selectable_value(&mut g.main_species, i as u8, n);
-                }
-            });
-            egui::ComboBox::from_label("Shrubs and pebbles").selected_text(name_of(g.shrub_species as usize)).show_ui(ui, |ui| {
-                for &i in &shown {
-                    let n = &names[i];
-                    ui.selectable_value(&mut g.shrub_species, i as u8, n);
-                }
-            });
-            ui.separator();
-            ui.label("Mix a second species into the canopy");
-            egui::ComboBox::from_id_salt("mix").selected_text(name_of(g.mix_species as usize)).show_ui(ui, |ui| {
-                for &i in &shown {
-                    let n = &names[i];
-                    ui.selectable_value(&mut g.mix_species, i as u8, n);
-                }
-            });
-            ui.add(egui::Slider::new(&mut g.mix_amount, 0.0..=1.0).text("Amount"));
-            ui.add(egui::Slider::new(&mut g.mix_scale, 40.0..=800.0).text("Clump size"));
-            ui.small("Painted trees use the brush species below.");
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_which_trees(&mut self, ui: &mut egui::Ui) {
-        // With procedural trees on, lists show only species that have a tree type, labelled with it.
-        let all = self.project.gen.procedural_forms;
-        let names: Vec<String> = self
-            .project
-            .species
-            .iter()
-            .map(|s| match s.tree_type(all) {
-                Some(t) => format!("{} ({})", s.name, treegen_sprite::tree_type_label(t)),
-                None => s.name.clone(),
-            })
-            .collect();
-        let shown: Vec<usize> = (0..names.len()).filter(|&i| !all || self.project.species[i].tree_type(true).is_some()).collect();
-        let name_of = |i: usize| names.get(i).cloned().unwrap_or_else(|| "?".into());
-
-
-        egui::CollapsingHeader::new("Which trees").default_open(false).show(ui, |ui| {
-            let g = &mut self.project.gen;
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut g.procedural_trees, "Generated");
-                ui.checkbox(&mut g.painted_trees, "Painted");
-            });
-            ui.small(format!("{} painted trees, {} erased areas", self.project.painted.len(), self.project.erased.len()));
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_brush(&mut self, ui: &mut egui::Ui) {
-        // With procedural trees on, lists show only species that have a tree type, labelled with it.
-        let all = self.project.gen.procedural_forms;
-        let names: Vec<String> = self
-            .project
-            .species
-            .iter()
-            .map(|s| match s.tree_type(all) {
-                Some(t) => format!("{} ({})", s.name, treegen_sprite::tree_type_label(t)),
-                None => s.name.clone(),
-            })
-            .collect();
-        let shown: Vec<usize> = (0..names.len()).filter(|&i| !all || self.project.species[i].tree_type(true).is_some()).collect();
-        let name_of = |i: usize| names.get(i).cloned().unwrap_or_else(|| "?".into());
-
-
-
-        egui::CollapsingHeader::new("Brush").default_open(true).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                for (t, l) in [(Tool::TreeBrush, "Paint"), (Tool::TreeStamp, "Single"), (Tool::TreeErase, "Erase")] {
-                    if ui.selectable_label(self.tool == t, l).clicked() {
-                        self.tool = t;
-                    }
-                }
-            });
-            let b = &mut self.brush;
-            egui::ComboBox::from_label("Species").selected_text(name_of(b.species as usize)).show_ui(ui, |ui| {
-                for &i in &shown {
-                    let n = &names[i];
-                    ui.selectable_value(&mut b.species, i as u8, n);
-                }
-            });
-            egui::ComboBox::from_label("Layer").selected_text(b.layer.name()).show_ui(ui, |ui| {
-                for l in TreeLayer::ALL {
-                    if ui.selectable_value(&mut b.layer, l, l.name()).changed() {
-                        // Sensible sizes per layer, matching the generator.
-                        let (lo, hi) = match l {
-                            TreeLayer::Canopy => (10.0, 17.0),
-                            TreeLayer::Shrub => (4.0, 9.0),
-                            TreeLayer::Lone => (8.0, 15.0),
-                            TreeLayer::Pebble => (2.0, 4.5),
-                        };
-                        b.size_min = lo;
-                        b.size_max = hi;
-                    }
-                }
-            });
-            ui.add(egui::Slider::new(&mut b.radius, 5.0..=400.0).text("Brush size"));
-            ui.add(egui::Slider::new(&mut b.size_min, 1.0..=80.0).text("Tree size min"));
-            ui.add(egui::Slider::new(&mut b.size_max, 1.0..=80.0).text("Tree size max"));
-            if b.size_max < b.size_min {
-                b.size_max = b.size_min;
-            }
-            ui.add(egui::Slider::new(&mut b.density, 0.0..=1.0).text("Density"));
-            ui.add(egui::Slider::new(&mut b.tone_jitter, 0.0..=0.4).text("Colour variation"));
-            ui.checkbox(&mut b.replace_generated, "Painting replaces generated trees");
-            ui.checkbox(&mut b.erase_generated, "Eraser removes generated trees too");
-            ui.checkbox(&mut b.erase_layer_only, "Eraser only affects this layer");
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
     pub(super) fn sec_species_editor(&mut self, ui: &mut egui::Ui) {
-        // With procedural trees on, lists show only species that have a tree type, labelled with it.
-        let all = self.project.gen.procedural_forms;
+        // Lists show the species with their tree type.
         let names: Vec<String> = self
             .project
             .species
             .iter()
-            .map(|s| match s.tree_type(all) {
+            .map(|s| match s.tree_type() {
                 Some(t) => format!("{} ({})", s.name, treegen_sprite::tree_type_label(t)),
                 None => s.name.clone(),
             })
             .collect();
-        let shown: Vec<usize> = (0..names.len()).filter(|&i| !all || self.project.species[i].tree_type(true).is_some()).collect();
+        let shown: Vec<usize> = (0..names.len()).filter(|&i| self.project.species[i].tree_type().is_some()).collect();
         let name_of = |i: usize| names.get(i).cloned().unwrap_or_else(|| "?".into());
 
 
@@ -1192,48 +934,17 @@ impl TreeApp {
                 });
                 ui.separator();
                 ui.separator();
-                if !all
-                    && ui
-                        .checkbox(&mut sp.procedural, "Procedural tree")
-                        .on_hover_text("Grow full trees with the procedural generator, five variations per type. Colours still come from this species.")
-                        .changed()
-                    && sp.procedural
-                    && sp.preset.is_empty()
-                {
-                    sp.preset = "quaking_aspen".into();
-                }
-                if all || sp.procedural {
-                    let text = if sp.preset.is_empty() { "None" } else { treegen_sprite::tree_type_label(&sp.preset) };
-                    egui::ComboBox::from_label("Tree type").selected_text(text).show_ui(ui, |ui| {
-                        for (key, label) in treegen_sprite::TREE_TYPES {
-                            if ui.selectable_value(&mut sp.preset, key.to_string(), *label).changed() {
-                                // picked by hand, so themes keep it
-                                sp.procedural = true;
-                            }
+                let text = if sp.preset.is_empty() { "None" } else { treegen_sprite::tree_type_label(&sp.preset) };
+                egui::ComboBox::from_label("Tree type").selected_text(text).show_ui(ui, |ui| {
+                    for (key, label) in treegen_sprite::TREE_TYPES {
+                        if ui.selectable_value(&mut sp.preset, key.to_string(), *label).changed() {
+                            // picked by hand, so themes keep it
+                            sp.procedural = true;
                         }
-                    });
-                    ui.small("The first render of a new type takes a few seconds while its trees are grown.");
-                    ui.add(egui::Slider::new(&mut sp.height, 0.2..=3.0).text("Height (shadow length)"));
-                } else {
-                    ui.strong("Branching");
-                    egui::ComboBox::from_label("Form").selected_text(sp.form.name()).show_ui(ui, |ui| {
-                        for f in Form::ALL {
-                            ui.selectable_value(&mut sp.form, f, f.name());
-                        }
-                    });
-                    ui.add(egui::Slider::new(&mut sp.branchiness, 0.4..=2.0).text("Branchiness"))
-                        .on_hover_text("More or fewer branches at every level");
-                    ui.add(egui::Slider::new(&mut sp.clumpiness, 0.3..=2.5).text("Clump size"));
-                    ui.add(egui::Slider::new(&mut sp.leaf_cover, 0.3..=2.0).text("Leaf cover"))
-                        .on_hover_text("How densely leaves cover the branches");
-                    ui.add(egui::Slider::new(&mut sp.height, 0.2..=3.0).text("Height (shadow length)"));
-                    ui.separator();
-                    ui.strong("Leaves");
-                    ui.add(egui::Slider::new(&mut sp.leaf_size, 0.5..=8.0).suffix(" px").text("Leaf size"));
-                    ui.add(egui::Slider::new(&mut sp.leaf_shape, 0.5..=6.0).text("Leaf length"));
-                    ui.checkbox(&mut sp.needles, "Needles point outward");
-                    ui.checkbox(&mut sp.bare, "Bare branches, no leaves");
-                }
+                    }
+                });
+                ui.small("The first render of a new type takes a few seconds while its trees are grown.");
+                ui.add(egui::Slider::new(&mut sp.height, 0.2..=3.0).text("Height (shadow length)"));
                 ui.horizontal(|ui| {
                     ui.label("Bark");
                     ui.color_edit_button_rgb(&mut sp.bark);
@@ -1248,50 +959,6 @@ impl TreeApp {
             if ui.button("Reset all species").clicked() {
                 self.project.species = default_species();
             }
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_leaf_colour(&mut self, ui: &mut egui::Ui) {
-        let l = &mut self.project.gen.leaf;
-        egui::CollapsingHeader::new("Leaf colour").default_open(true).show(ui, |ui| {
-            pct_slider(ui, &mut l.variety, 300.0, "Colour variety", "Each leaf lighter, darker, yellower or bluer");
-            pct_slider(ui, &mut l.mottling, 300.0, "Mottling", "Broad lighter and darker patches");
-            ui.add(egui::Slider::new(&mut l.mottle_size, 4.0..=40.0).suffix(" px").text("Mottling size"));
-            pct_slider(ui, &mut l.dappled, 150.0, "Sun-dappled tops", "Sun-facing clumps warm up");
-            pct_slider(ui, &mut l.tree_lean, 150.0, "Per-tree colour lean", "Some trees lean lime, some blue-green");
-            if ui.button("Reset to my defaults").clicked() {
-                *l = LeafStyle::default();
-            }
-            ui.small("Leaf size, shape and colours are per species, in the Trees tab.");
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_canopy_depth_and_clusters(&mut self, ui: &mut egui::Ui) {
-        let l = &mut self.project.gen.leaf;
-        let d = &mut self.project.gen.depth;
-        egui::CollapsingHeader::new("Canopy depth and clusters").default_open(true).show(ui, |ui| {
-            pct_slider(ui, &mut d.crown_tone, 200.0, "Patch tone", "Broad lighter and darker patches across crowns");
-            ui.add(egui::Slider::new(&mut d.crown_tone_size, 12.0..=120.0).suffix(" px").text("Patch size"));
-            pct_slider(ui, &mut d.crown_shade, 150.0, "Crown shading", "Crown tops lit, gaps between crowns dark");
-            ui.add(egui::Slider::new(&mut d.shade_radius, 4.0..=40.0).suffix(" px").text("Shading reach"))
-                .on_hover_text("How far away a crown is compared with to decide if it is high or low");
-            pct_slider(ui, &mut d.height_var, 150.0, "Crown height variation", "Taller crowns shade the ones beside them");
-            pct_slider(ui, &mut d.crown_var, 150.0, "Crown to crown difference", "Neighbouring crowns differ in brightness, so clusters follow crown outlines");
-            pct_slider(ui, &mut d.cluster_tone, 200.0, "Clump colour", "How much whole leaf clumps share a colour");
-            pct_slider(ui, &mut d.depth_strength, 200.0, "Depth darkening", "How much low and deep parts darken");
-            ui.add(egui::Slider::new(&mut d.gain, 0.5..=2.0).text("Brightness"));
-            ui.add(egui::Slider::new(&mut d.gamma, 0.4..=1.4).text("Shadow lift"))
-                .on_hover_text("Below 1 lifts shadows and midtones");
-            ui.horizontal(|ui| {
-                if ui.button("Reset to my defaults").clicked() {
-                    *d = DepthStyle::default();
-                }
-                if ui.button("CG2A match").on_hover_text("Settings tuned to CG2A's brightness spread across crowns").clicked() {
-                    *d = DepthStyle::cg2a_match();
-                }
-            });
         });
     }
 
@@ -1327,142 +994,6 @@ impl TreeApp {
     }
 
     #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_snow(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("Snow").default_open(true).show(ui, |ui| {
-            let sn = &mut self.project.gen.snow;
-            ui.small("Snow on crowns and ground. Amount 0 turns it off.");
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Looks:");
-                for (name, look) in snow_looks() {
-                    if ui.button(name).clicked() {
-                        *sn = look;
-                    }
-                }
-            });
-            ui.separator();
-            pct_slider(ui, &mut sn.amount, 100.0, "Amount", "How much snow there is overall");
-            egui::ComboBox::from_label("Where").selected_text(sn.mode.name()).show_ui(ui, |ui| {
-                for m in SnowMode::ALL {
-                    ui.selectable_value(&mut sn.mode, m, m.name());
-                }
-            });
-            match sn.mode {
-                SnowMode::Edge => {
-                    ui.add(egui::Slider::new(&mut sn.reach, 20.0..=600.0).suffix(" px").text("Edge width"))
-                        .on_hover_text("How far in from the outer edge the snow reaches");
-                }
-                SnowMode::Gradient => {
-                    ui.horizontal(|ui| {
-                        angle_dial(ui, &mut sn.angle);
-                        ui.vertical(|ui| {
-                            ui.label("Snow rises toward");
-                            ui.add(egui::DragValue::new(&mut sn.angle).range(0.0..=360.0).suffix(" deg"));
-                            ui.horizontal(|ui| {
-                                for (lbl, a) in [("Top", 270.0), ("Right", 0.0), ("Bottom", 90.0), ("Left", 180.0)] {
-                                    if ui.small_button(lbl).clicked() {
-                                        sn.angle = a;
-                                    }
-                                }
-                            });
-                        });
-                    });
-                }
-                SnowMode::Everywhere => {}
-            }
-            pct_slider(ui, &mut sn.tops, 100.0, "Clings to tops", "100% keeps snow on the upward facing tops of crowns, 0% covers crowns evenly");
-            pct_slider(ui, &mut sn.ground, 100.0, "Ground cover", "How much of the grass and ground turns white");
-            pct_slider(ui, &mut sn.patchiness, 100.0, "Patchiness", "Breaks the snow into patches");
-            ui.horizontal(|ui| {
-                ui.color_edit_button_rgb(&mut sn.tint);
-                ui.label("Snow colour");
-            });
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_fire(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("Fire").default_open(true).show(ui, |ui| {
-            let fi = &mut self.project.gen.fire;
-            ui.small("Scorched and charred crowns, flames, ash and embers. Amount 0 turns it off.");
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Looks:");
-                for (name, look) in fire_looks() {
-                    if ui.button(name).clicked() {
-                        *fi = look;
-                    }
-                }
-            });
-            ui.separator();
-            pct_slider(ui, &mut fi.amount, 100.0, "Amount", "How much of the forest has burnt");
-            egui::ComboBox::from_label("Where").selected_text(fi.mode.name()).show_ui(ui, |ui| {
-                for m in FireMode::ALL {
-                    ui.selectable_value(&mut fi.mode, m, m.name());
-                }
-            });
-            match fi.mode {
-                FireMode::Edge => {
-                    ui.add(egui::Slider::new(&mut fi.reach, 20.0..=600.0).suffix(" px").text("Edge width"))
-                        .on_hover_text("How far in from the outer edge the fire reaches");
-                }
-                FireMode::Front => {
-                    ui.horizontal(|ui| {
-                        angle_dial(ui, &mut fi.angle);
-                        ui.vertical(|ui| {
-                            ui.label("Fire comes from");
-                            ui.add(egui::DragValue::new(&mut fi.angle).range(0.0..=360.0).suffix(" deg"));
-                            ui.horizontal(|ui| {
-                                for (lbl, a) in [("Top", 270.0), ("Right", 0.0), ("Bottom", 90.0), ("Left", 180.0)] {
-                                    if ui.small_button(lbl).clicked() {
-                                        fi.angle = a;
-                                    }
-                                }
-                            });
-                        });
-                    });
-                }
-                FireMode::Everywhere => {}
-            }
-            pct_slider(ui, &mut fi.flames, 100.0, "Flames", "How much of the burnt area is still alight");
-            pct_slider(ui, &mut fi.char, 100.0, "Charring", "How black the burnt crowns and ground get");
-            pct_slider(ui, &mut fi.embers, 100.0, "Embers", "Glowing embers and beds on the ground");
-            pct_slider(ui, &mut fi.glow, 100.0, "Glow", "Warm light the flames throw on nearby trees");
-            pct_slider(ui, &mut fi.patchiness, 100.0, "Patchiness", "Breaks the fire into patches");
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
-    pub(super) fn sec_shadows(&mut self, ui: &mut egui::Ui) {
-        let light = &mut self.project.light;
-        let grading = &mut self.project.grading;
-        egui::CollapsingHeader::new("Shadows").default_open(true).show(ui, |ui| {
-            ui.checkbox(&mut light.shadows, "Cast shadows");
-            ui.checkbox(&mut light.flat, "Flat light (no light direction)");
-            ui.horizontal(|ui| {
-                angle_dial(ui, &mut light.shadow_angle);
-                ui.vertical(|ui| {
-                    ui.label("Shadow direction");
-                    ui.add(egui::DragValue::new(&mut light.shadow_angle).range(0.0..=360.0).suffix(" deg"));
-                    ui.horizontal(|ui| {
-                        for (lbl, a) in [("UL", 225.0), ("UR", 315.0), ("DL", 135.0), ("DR", 45.0)] {
-                            if ui.small_button(lbl).on_hover_text("Shadows fall this way").clicked() {
-                                light.shadow_angle = a;
-                            }
-                        }
-                    });
-                });
-            });
-            ui.add(egui::Slider::new(&mut light.elevation, 10.0..=90.0).text("Sun elevation"));
-            ui.add(egui::Slider::new(&mut light.shadow_length, 0.2..=4.0).text("Shadow length"));
-            ui.add(egui::Slider::new(&mut light.shadow_softness, 0.0..=4.0).text("Shadow softness"));
-            ui.add(egui::Slider::new(&mut grading.shadow_opacity, 0.0..=1.0).text("Shadow opacity"));
-            ui.horizontal(|ui| {
-                ui.label("Shadow colour");
-                ui.color_edit_button_rgb(&mut grading.shadow_color);
-            });
-        });
-    }
-
-    #[allow(unused_variables, unused_mut)]
     pub(super) fn sec_export(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Export").default_open(true).show(ui, |ui| {
             ui.add(egui::Slider::new(&mut self.export_scale, 0.25..=4.0).text("Export scale"));
@@ -1474,7 +1005,19 @@ impl TreeApp {
             ui.checkbox(&mut self.variants.main, "With shadows");
             ui.checkbox(&mut self.variants.no_shadow, "Without shadows (_noshadow)");
             ui.checkbox(&mut self.variants.shadow_only, "Ground shadow only (_shadow)");
-            if ui.button("Export PNG").clicked() {
+            egui::ComboBox::from_label("Format").selected_text(self.export_format.label()).show_ui(ui, |ui| {
+                for f in forest_core::render::ExportFormat::ALL {
+                    ui.selectable_value(&mut self.export_format, f, f.label());
+                }
+            });
+            ui.small(match self.export_format {
+                forest_core::render::ExportFormat::Png => "Quick to write.",
+                forest_core::render::ExportFormat::PngSmall => "A smaller file, slower to write.",
+                forest_core::render::ExportFormat::Tiles => "A folder of 1024 px tiles with an index file. Any map size fits.",
+                forest_core::render::ExportFormat::Webp => "Lossless and usually less than half the size of PNG. Needs the whole picture in memory.",
+                forest_core::render::ExportFormat::Jpeg => "Small files without transparency. Needs the whole picture in memory.",
+            });
+            if ui.button("Export").clicked() {
                 self.export();
             }
         });
@@ -1540,15 +1083,15 @@ impl TreeApp {
     /// Apply the active tree tool at a map position.
     fn brush_at(&mut self, m: [f32; 2], first: bool) {
         match self.tool {
-            Tool::TreeBrush => {
+            Tool::Brush => {
                 paint_dab(&mut self.project, &self.brush, m[0], m[1], &mut self.paint_rng);
             }
-            Tool::TreeStamp => {
+            Tool::Single => {
                 if first {
                     stamp_one(&mut self.project, &self.brush, m[0], m[1], &mut self.paint_rng);
                 }
             }
-            Tool::TreeErase => {
+            Tool::Eraser => {
                 erase_dab(&mut self.project, &self.brush, m[0], m[1]);
                 self.painted_rendered = self.painted_rendered.min(self.project.painted.len());
             }
@@ -1584,68 +1127,100 @@ impl TreeApp {
         if resp.dragged_by(PointerButton::Middle) || (resp.dragged_by(PointerButton::Primary) && (self.tool == Tool::Pan || space)) {
             self.pan += resp.drag_delta();
         } else {
-            match self.tool {
-                Tool::Lasso | Tool::LassoCut => {
-                    if resp.drag_started_by(PointerButton::Primary) {
-                        self.stroke.clear();
-                    }
-                    if resp.dragged_by(PointerButton::Primary) {
-                        if let Some(p) = resp.interact_pointer_pos() {
-                            let m = self.screen_to_map(origin, p);
-                            let far = self.stroke.last().map_or(true, |l| {
-                                let d = ((l[0] - m[0]).powi(2) + (l[1] - m[1]).powi(2)).sqrt();
-                                d * self.zoom > 3.0
-                            });
-                            if far {
-                                self.stroke.push(m);
-                            }
+            if self.calibrating {
+                if resp.clicked_by(PointerButton::Primary) {
+                    if let Some(p) = resp.interact_pointer_pos() {
+                        if self.calib.len() >= 2 {
+                            self.calib.clear();
                         }
-                    }
-                    if resp.drag_stopped_by(PointerButton::Primary) {
-                        let pts = chaikin(&std::mem::take(&mut self.stroke), 2);
-                        self.add_shape(pts, self.tool.op());
+                        self.calib.push(self.screen_to_map(origin, p));
                     }
                 }
-                Tool::Polygon | Tool::PolygonCut => {
-                    if resp.clicked_by(PointerButton::Primary) {
-                        if let Some(p) = resp.interact_pointer_pos() {
-                            let m = self.screen_to_map(origin, p);
-                            self.stroke.push(m);
+            } else {
+                let ctx = ui.ctx().clone();
+                match self.tool {
+                    Tool::Lasso | Tool::Mask => {
+                        if resp.drag_started_by(PointerButton::Primary) {
+                            self.stroke.clear();
                         }
-                    }
-                    if resp.clicked_by(PointerButton::Secondary) || resp.double_clicked() {
-                        let pts = std::mem::take(&mut self.stroke);
-                        self.add_shape(pts, self.tool.op());
-                    }
-                }
-                Tool::Pan => {}
-                Tool::Zones => self.zone_input(ui, &resp, origin),
-                Tool::TreeBrush | Tool::TreeStamp | Tool::TreeErase => {
-                    let pressed = resp.drag_started_by(PointerButton::Primary) || resp.clicked_by(PointerButton::Primary);
-                    if pressed {
-                        if let Some(p) = resp.interact_pointer_pos() {
-                            self.push_undo();
-                            let m = self.screen_to_map(origin, p);
-                            self.brush_at(m, true);
-                        }
-                    } else if resp.dragged_by(PointerButton::Primary) && self.tool != Tool::TreeStamp {
-                        if let (Some(p), Some(last)) = (resp.interact_pointer_pos(), self.last_dab) {
-                            let m = self.screen_to_map(origin, p);
-                            // Dabs at even spacing along the stroke, even when the mouse jumps.
-                            let (dx, dy) = (m[0] - last[0], m[1] - last[1]);
-                            let dist = (dx * dx + dy * dy).sqrt();
-                            let step = self.brush.dab_step();
-                            if dist >= step {
-                                let n = (dist / step).floor() as usize;
-                                for k in 1..=n {
-                                    let t = k as f32 * step / dist;
-                                    self.brush_at([last[0] + dx * t, last[1] + dy * t], false);
+                        if resp.dragged_by(PointerButton::Primary) {
+                            if let Some(p) = resp.interact_pointer_pos() {
+                                let m = self.screen_to_map(origin, p);
+                                let far = self.stroke.last().map_or(true, |l| {
+                                    let d = ((l[0] - m[0]).powi(2) + (l[1] - m[1]).powi(2)).sqrt();
+                                    d * self.zoom > 3.0
+                                });
+                                if far {
+                                    self.stroke.push(m);
                                 }
                             }
                         }
+                        if resp.drag_stopped_by(PointerButton::Primary) {
+                            let raw = std::mem::take(&mut self.stroke);
+                            self.finish_lasso(raw, &ctx);
+                        }
                     }
-                    if resp.drag_stopped() || (pressed && !resp.dragged()) {
-                        self.last_dab = None;
+                    Tool::Polygon | Tool::Line => {
+                        if resp.clicked_by(PointerButton::Primary) {
+                            if let Some(p) = resp.interact_pointer_pos() {
+                                let mut m = self.screen_to_map(origin, p);
+                                if self.snap {
+                                    if let Some(sp) = self.snap_point(m, None) {
+                                        m = sp;
+                                    }
+                                }
+                                self.stroke.push(m);
+                            }
+                        }
+                        if resp.clicked_by(PointerButton::Secondary) || resp.double_clicked() {
+                            let pts = std::mem::take(&mut self.stroke);
+                            if self.tool == Tool::Line {
+                                self.stroke = pts;
+                                self.finish_line();
+                            } else {
+                                self.finish_polygon(pts, &ctx);
+                            }
+                        }
+                    }
+                    Tool::Wand => {
+                        if resp.clicked_by(PointerButton::Primary) {
+                            if let Some(p) = resp.interact_pointer_pos() {
+                                let m = self.screen_to_map(origin, p);
+                                let mode = self.mode_now(&ctx);
+                                self.wand_click(m, mode);
+                                self.wand_preview = None;
+                            }
+                        }
+                    }
+                    Tool::Pan => {}
+                    Tool::Select => self.zone_input(ui, &resp, origin),
+                    Tool::Brush | Tool::Single | Tool::Eraser => {
+                        let pressed = resp.drag_started_by(PointerButton::Primary) || resp.clicked_by(PointerButton::Primary);
+                        if pressed {
+                            if let Some(p) = resp.interact_pointer_pos() {
+                                self.push_undo();
+                                let m = self.screen_to_map(origin, p);
+                                self.brush_at(m, true);
+                            }
+                        } else if resp.dragged_by(PointerButton::Primary) && self.tool != Tool::Single {
+                            if let (Some(p), Some(last)) = (resp.interact_pointer_pos(), self.last_dab) {
+                                let m = self.screen_to_map(origin, p);
+                                // Dabs at even spacing along the stroke, even when the mouse jumps.
+                                let (dx, dy) = (m[0] - last[0], m[1] - last[1]);
+                                let dist = (dx * dx + dy * dy).sqrt();
+                                let step = self.brush.dab_step();
+                                if dist >= step {
+                                    let n = (dist / step).floor() as usize;
+                                    for k in 1..=n {
+                                        let t = k as f32 * step / dist;
+                                        self.brush_at([last[0] + dx * t, last[1] + dy * t], false);
+                                    }
+                                }
+                            }
+                        }
+                        if resp.drag_stopped() || (pressed && !resp.dragged()) {
+                            self.last_dab = None;
+                        }
                     }
                 }
             }
@@ -1659,54 +1234,71 @@ impl TreeApp {
         self.pixels_per_point = ui.ctx().pixels_per_point();
         painter.rect_filled(rect, 0.0, Color32::from_gray(40));
         let map_rect = Rect::from_min_size(self.map_to_screen(origin, [0.0, 0.0]), Vec2::new(mw, mh) * self.zoom);
-        let bg = Color32::from_rgb((self.background[0] * 255.0) as u8, (self.background[1] * 255.0) as u8, (self.background[2] * 255.0) as u8);
-        painter.rect_filled(map_rect, 0.0, bg);
-        self.draw_background(&painter, map_rect);
-        let shown = if self.gpu_layers.is_some() { self.gpu_texture } else { self.texture.as_ref().map(|t| t.id()) };
-        if let Some(id) = shown {
-            let full = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-            let mut shown_at = map_rect;
-            match (&self.gpu_view, self.gpu_layers.is_some()) {
-                (Some(v), true) => {
-                    // the GPU image covers only part of the map
-                    let at = |px: f32, py: f32| self.map_to_screen(origin, [px / v.scale, py / v.scale]);
-                    let mut r = Rect::from_min_max(at(v.origin[0] as f32, v.origin[1] as f32), at((v.origin[0] + v.size[0]) as f32, (v.origin[1] + v.size[1]) as f32));
-                    // At one render pixel per screen pixel, put the picture exactly on the pixel grid so
-                    // it is not smeared by half a pixel.
-                    let ppp = self.pixels_per_point;
-                    if (v.scale / (self.zoom * ppp * self.view_detail) - 1.0).abs() < 0.01 && self.view_detail == 1.0 {
-                        let min = Pos2::new((r.min.x * ppp).round() / ppp, (r.min.y * ppp).round() / ppp);
-                        r = Rect::from_min_size(min, Vec2::new(v.size[0] as f32, v.size[1] as f32) / ppp);
-                    }
-                    painter.image(id, r, full, Color32::WHITE);
-                    shown_at = r;
-                }
-                _ => {
-                    painter.image(id, map_rect, full, Color32::WHITE);
-                }
-            }
-            // zones with their own settings are layers over it
-            let layer_ids: Vec<egui::TextureId> = if self.gpu_layers.is_some() {
-                self.extra_gpu.iter().filter_map(|e| e.texture).collect()
-            } else {
-                self.extra_cpu.iter().filter_map(|(_, t)| t.as_ref().map(|t| t.id())).collect()
-            };
-            for lid in layer_ids {
-                painter.image(lid, shown_at, full, Color32::WHITE);
-            }
-        }
+        self.draw_picture(ui, &painter, rect, origin, map_rect);
         painter.rect_stroke(map_rect, 0.0, Stroke::new(1.0, Color32::from_gray(90)), egui::StrokeKind::Outside);
 
         self.draw_zones(&painter, origin);
+        self.draw_reference_overlays(&painter, origin, map_rect);
+        let ctx = ui.ctx().clone();
+        let mode_now = self.mode_now(&ctx);
+        let mode_col = match mode_now {
+            Mode::Add => Color32::from_rgb(140, 255, 140),
+            Mode::Subtract => Color32::from_rgb(255, 120, 120),
+            Mode::Intersect => Color32::from_rgb(255, 210, 90),
+        };
         if !self.stroke.is_empty() {
             let mut pts: Vec<Pos2> = self.stroke.iter().map(|p| self.map_to_screen(origin, *p)).collect();
-            if matches!(self.tool, Tool::Polygon | Tool::PolygonCut) {
+            if matches!(self.tool, Tool::Polygon | Tool::Line) {
                 if let Some(h) = resp.hover_pos() {
                     pts.push(h);
                 }
             }
-            let col = if self.tool.op() == ShapeOp::Add { Color32::from_rgb(140, 255, 140) } else { Color32::from_rgb(255, 120, 120) };
-            painter.add(egui::Shape::line(pts, Stroke::new(2.0, col)));
+            let col = if self.tool == Tool::Line {
+                Color32::from_rgb(255, 220, 90)
+            } else if self.tool == Tool::Mask {
+                Color32::from_rgb(220, 90, 90)
+            } else {
+                mode_col
+            };
+            if self.tool == Tool::Line {
+                // the band the path will make
+                painter.add(egui::Shape::line(pts.clone(), Stroke::new(self.line_width * self.zoom, Color32::from_rgba_unmultiplied(255, 255, 255, 30))));
+            }
+            painter.add(egui::Shape::line(pts.clone(), Stroke::new(2.0, col)));
+            for q in &pts {
+                painter.circle_filled(*q, 3.0, col);
+            }
+        }
+        if let Some(h) = resp.hover_pos() {
+            // a corner or edge of another zone the next point would snap to
+            if self.snap && matches!(self.tool, Tool::Polygon | Tool::Line | Tool::Lasso) {
+                let m = self.screen_to_map(origin, h);
+                if let Some(sp) = self.snap_point(m, None) {
+                    let c = self.map_to_screen(origin, sp);
+                    painter.add(egui::Shape::convex_polygon(vec![c + Vec2::new(0.0, -8.0), c + Vec2::new(8.0, 0.0), c + Vec2::new(0.0, 8.0), c + Vec2::new(-8.0, 0.0)], Color32::TRANSPARENT, Stroke::new(1.6, Color32::from_rgb(255, 120, 220))));
+                }
+            }
+            if self.tool == Tool::Wand && self.bg_pixels.is_some() && !self.calibrating {
+                let m = self.screen_to_map(origin, h);
+                let cell = [(m[0] / 3.0) as i32, (m[1] / 3.0) as i32];
+                let stale = self.wand_preview.as_ref().map_or(true, |(t, c, _)| *c != cell && t.elapsed() > Duration::from_millis(110));
+                if stale {
+                    let regions = self.wand_regions(m);
+                    self.wand_preview = Some((Instant::now(), cell, regions));
+                    ctx.request_repaint_after(Duration::from_millis(120));
+                }
+                if let Some((_, _, regions)) = &self.wand_preview {
+                    for r in regions {
+                        for (k, ring) in r.iter().enumerate() {
+                            let pts: Vec<Pos2> = ring.iter().map(|p| self.map_to_screen(origin, *p)).collect();
+                            let col = if k == 0 { mode_col } else { Color32::from_rgb(255, 255, 255) };
+                            painter.add(egui::Shape::closed_line(pts, Stroke::new(1.8, col)));
+                        }
+                    }
+                }
+                painter.circle_stroke(h, 5.0, Stroke::new(1.5, Color32::WHITE));
+                painter.text(h + Vec2::new(14.0, 12.0), egui::Align2::LEFT_TOP, format!("Tolerance {:.0}  |  click to {}", self.wand_tol, match mode_now { Mode::Add => "add", Mode::Subtract => "subtract", Mode::Intersect => "intersect" }), egui::FontId::proportional(11.0), Color32::WHITE);
+            }
         }
         if self.tool.is_brush() {
             let (grow, shrink) = ui.input(|i| (i.key_pressed(Key::CloseBracket), i.key_pressed(Key::OpenBracket)));
@@ -1722,8 +1314,8 @@ impl TreeApp {
                 painter.circle_stroke(self.map_to_screen(origin, [t.x, t.y]), t.r * self.zoom, Stroke::new(1.0, pending));
             }
             if let Some(h) = resp.hover_pos() {
-                let col = if self.tool == Tool::TreeErase { Color32::from_rgb(255, 120, 120) } else { Color32::from_rgb(200, 255, 160) };
-                let r = if self.tool == Tool::TreeStamp { self.brush.size_max } else { self.brush.radius };
+                let col = if self.tool == Tool::Eraser { Color32::from_rgb(255, 120, 120) } else { Color32::from_rgb(200, 255, 160) };
+                let r = if self.tool == Tool::Single { self.brush.size_max } else { self.brush.radius };
                 painter.circle_stroke(h, r * self.zoom, Stroke::new(1.5, col));
             }
         }
@@ -1739,13 +1331,19 @@ impl eframe::App for TreeApp {
         self.shortcuts(&ctx);
         self.sync_background(&ctx);
         self.poll_worker(&ctx);
+        self.compare_test_hooks();
+        self.run_selftest_actions(&ctx);
         self.run_shot(&ctx);
 
         {
             egui::Panel::top("top").show(ui, |ui| self.top_bar(ui));
+            if self.compare {
+                egui::Panel::top("compare").show(ui, |ui| self.compare_bar(ui));
+            }
             egui::Panel::bottom("status").show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(&self.status);
+                    let msg = if self.status.is_empty() { self.tool.hint().to_string() } else { self.status.clone() };
+                    ui.label(msg);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some((_, c)) = &self.render_info {
                             let how = if self.gpu_layers.is_some() { "GPU" } else { "CPU" };
@@ -1754,8 +1352,11 @@ impl eframe::App for TreeApp {
                     });
                 });
             });
-            egui::Panel::left("tools").resizable(false).default_size(185.0).show(ui, |ui| self.tool_panel(ui));
-            egui::Panel::right("settings").resizable(true).default_size(360.0).size_range(280.0..=640.0).show(ui, |ui| self.with_zone_settings(ui));
+            egui::Panel::top("options").show(ui, |ui| self.options_bar(ui));
+            egui::Panel::left("tools").resizable(false).exact_size(52.0).show(ui, |ui| self.tool_strip(ui));
+            egui::Panel::left("zones").resizable(true).default_size(250.0).size_range(210.0..=420.0).show(ui, |ui| self.zones_panel(ui));
+            egui::Panel::right("settings").resizable(true).default_size(420.0).size_range(300.0..=700.0).show(ui, |ui| self.with_zone_settings(ui));
+            egui::Panel::bottom("species").show(ui, |ui| self.species_strip(ui));
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             self.canvas(ui);
@@ -1933,22 +1534,3 @@ fn angle_dial(ui: &mut egui::Ui, angle: &mut f32) {
     painter.arrow(c, tip - c, Stroke::new(2.0, Color32::from_gray(220)));
 }
 
-/// Chaikin corner cutting on a closed loop.
-fn chaikin(pts: &[[f32; 2]], iterations: usize) -> Vec<[f32; 2]> {
-    let mut p = pts.to_vec();
-    if p.len() < 3 {
-        return p;
-    }
-    for _ in 0..iterations {
-        let n = p.len();
-        let mut q = Vec::with_capacity(n * 2);
-        for i in 0..n {
-            let a = p[i];
-            let b = p[(i + 1) % n];
-            q.push([0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]]);
-            q.push([0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]]);
-        }
-        p = q;
-    }
-    p
-}

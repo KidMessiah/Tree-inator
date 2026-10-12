@@ -1,0 +1,5 @@
+GLCHMT_PR_15March2017_63_64_70_l0s9_CHM 12.8238 MB | GLORTHO_PR_15March2017_63_64_70_l0s9_ortho 374.378 MB | overlap 0.00033
+200 GLCHMT_PR_15March2017_63_64_70_l0s9_CHM
+saved D:\DnD\Software\Tree-inator\Tree-inator\research\scripts\..\gliht\GLCHMT_PR_15March2017_63_64_70_l0s9_CHM.tif 13 MB
+200 GLORTHO_PR_15March2017_63_64_70_l0s9_ortho
+saved D:\DnD\Software\Tree-inator\Tree-inator\research\scripts\..\gliht\GLORTHO_PR_15March2017_63_64_70_l0s9_ortho.tif 392 MB

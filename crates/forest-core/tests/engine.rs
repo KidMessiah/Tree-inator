@@ -154,17 +154,15 @@ fn sprite_trees_render_and_stay_deterministic() {
 
 #[test]
 fn sprite_generator_makes_distinct_species() {
-    use forest_core::wp::{make_sprite, SpriteSpec};
-    let mk = |form, bare| SpriteSpec { form, branchiness: 1.0, clumpiness: 1.0, leaf_cover: 1.0, leaf_px: 2.6, leaf_elong: 1.3, along: false, bare };
-    let oak = make_sprite(&mk(Form::Oak, false), 14.0, 1);
-    let oak2 = make_sprite(&mk(Form::Oak, false), 14.0, 2);
-    let dead = make_sprite(&mk(Form::Dead, true), 14.0, 1);
-    let filled = |s: &forest_core::wp::Sprite| s.cls.iter().filter(|c| **c != 0).count();
+    use forest_core::treegen_sprite::sprite_for_radius;
+    let filled = |s: &forest_core::sprite::Sprite| s.cls.iter().filter(|c| **c != 0).count();
+    let oak = sprite_for_radius("black_oak", 1, 14.0, -1.0).unwrap();
+    let oak2 = sprite_for_radius("black_oak", 2, 14.0, -1.0).unwrap();
+    let dead = sprite_for_radius("snag", 1, 14.0, -1.0).unwrap();
     assert!(filled(&oak) > 200, "oak fills its crown: {}", filled(&oak));
-    assert!(filled(&dead) < filled(&oak), "a bare tree covers less than a leafy one");
-    assert!(dead.cls.iter().all(|c| *c != 1), "dead trees have no leaves");
-    assert_ne!(oak.z, oak2.z, "different seeds give different trees");
-    assert_eq!(make_sprite(&mk(Form::Oak, false), 14.0, 1).z, oak.z, "same seed, same tree");
+    assert!(filled(&dead) < filled(&oak), "a snag covers less than a leafy tree");
+    assert_ne!(oak.z, oak2.z, "different variants give different trees");
+    assert_eq!(sprite_for_radius("black_oak", 1, 14.0, -1.0).unwrap().z, oak.z, "same variant, same tree");
     assert!(oak.depth.iter().cloned().fold(0.0, f32::max) <= 1.0);
 }
 
@@ -371,7 +369,7 @@ fn preset_trees_are_solid_and_deterministic() {
     assert!(covered as f32 / inside as f32 > 0.9, "dense crown: {covered} of {inside}");
     // The canopy comes from the generator: the raw tree is much sparser and shows more wood.
     let raw = build_sprite("quaking_aspen", 0, 0.0, 40.0).unwrap();
-    let count = |s: &forest_core::wp::Sprite, c: u8| s.cls.iter().filter(|v| **v == c).count();
+    let count = |s: &forest_core::sprite::Sprite, c: u8| s.cls.iter().filter(|v| **v == c).count();
     assert!(count(&a, 1) > count(&raw, 1) * 3 / 2, "more leaves than the raw tree");
     assert!(count(&a, 2) * count(&raw, 1) < count(&raw, 2) * count(&a, 1), "less wood showing");
     // A palm keeps its open fronds when fill is off.
@@ -390,11 +388,21 @@ fn themes_keep_a_procedural_tree_type() {
     let hell = themes().into_iter().find(|t| t.name == "Hellscape").expect("theme exists");
     p.apply_theme(&hell);
     let sp = &p.species[p.gen.main_species as usize];
-    assert_eq!(sp.tree_type(false), Some("black_oak"), "tree type survives the theme");
-    assert_eq!(sp.ramp, hell.species[0].ramp, "colours come from the theme");
-    // A species that was not procedural takes the theme's own form.
+    assert_eq!(sp.tree_type(), Some("black_oak"), "tree type survives the theme");
+    // plain themes take the lightness steps of a real stand, so the colours move, but stay the theme's: dark to light
+    // order is kept and the colours stay near the theme's
+    let lum = |c: &[f32; 3]| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    for w in sp.ramp.windows(2) {
+        assert!(lum(&w[0]) < lum(&w[1]), "ramp still goes from dark to light");
+    }
+    for (a, b) in sp.ramp.iter().zip(hell.species[0].ramp.iter()) {
+        for k in 0..3 {
+            assert!((a[k] - b[k]).abs() < 0.3, "colours come from the theme: {a:?} vs {b:?}");
+        }
+    }
+    // A species that was not picked by hand takes the theme's own tree type.
     let shrub = &p.species[p.gen.shrub_species as usize];
-    assert!(shrub.tree_type(false).is_none());
+    assert_eq!(shrub.tree_type(), Some(hell.species[2].preset.as_str()));
 }
 
 #[test]
@@ -420,6 +428,32 @@ fn gpu_shading_matches_cpu() {
         assert!(worst <= 40 && mean < 0.2, "GPU {name} differs from CPU: worst {worst}, mean {mean:.3}");
     }
 }
+
+#[test]
+fn gpu_shading_with_occlusion_glow_and_lumps_matches_cpu() {
+    let Some(g) = forest_core::gpu::Gpu::headless() else {
+        eprintln!("no GPU here, skipping");
+        return;
+    };
+    let mut p = project();
+    p.gen.depth.canopy_ao = 0.8;
+    p.gen.depth.translucency = 0.8;
+    p.gen.depth.lumps = 0.6;
+    let opts = ComposeOptions { background: Some([0.8, 0.78, 0.7]), ..Default::default() };
+    let cpu = compose(&generate(&p, 1.0, &|| false).unwrap(), &p.grading, opts);
+    let plan = forest_core::engine::plan(&p, 1.0, &|| false).unwrap();
+    let (w, h) = render_size(&p, 1.0);
+    let st = forest_core::engine::stamp_region(&p, &plan, 1.0, forest_core::engine::Region { x0: 0, y0: 0, w, h }, &|| false).unwrap();
+    // shading CPU stamps, and stamping on the GPU as well
+    let shaded = g.compose_rgba(&g.shade(&p, &plan, &st), &p.grading, opts);
+    let rendered = g.compose_rgba(&g.render(&p, &plan, 1.0, forest_core::engine::Region { x0: 0, y0: 0, w, h }), &p.grading, opts);
+    for (name, gpu) in [("shaded", shaded), ("stamped and shaded", rendered)] {
+        let worst = cpu.iter().zip(&gpu).map(|(a, b)| (*a as i32 - *b as i32).abs()).max().unwrap();
+        let mean = cpu.iter().zip(&gpu).map(|(a, b)| (*a as i32 - *b as i32).abs() as f64).sum::<f64>() / cpu.len() as f64;
+        assert!(worst <= 40 && mean < 0.2, "GPU {name} differs from CPU: worst {worst}, mean {mean:.3}");
+    }
+}
+
 
 #[test]
 fn gpu_view_matches_full_render() {
@@ -610,7 +644,7 @@ fn dead_trees_lose_wood_as_they_decay_and_living_trees_are_unchanged() {
 fn a_background_picture_never_changes_the_render() {
     let mut p = project();
     let plain = compose(&generate(&p, 0.5, &|| false).unwrap(), &p.grading, ComposeOptions::default());
-    p.background_image = Some(BackgroundImage { path: "somewhere.png".into(), opacity: 0.5, visible: true });
+    p.background_image = Some(BackgroundImage { path: "somewhere.png".into(), opacity: 0.5, visible: true, ..Default::default() });
     let with = compose(&generate(&p, 0.5, &|| false).unwrap(), &p.grading, ComposeOptions::default());
     assert_eq!(plain, with);
     // the picture is kept out of the cache key, so changing it reuses the plan
@@ -711,6 +745,17 @@ fn clearings_cut_every_layer() {
     let img = compose_stack(&generate_stack(&p, 0.5, &|| false).unwrap(), &p.grading, ComposeOptions::default());
     let (w, _) = render_size(&p, 0.5);
     // the middle of the clearing has no canopy
+    let (cx, cy) = ((590.0f32 * 0.5) as usize, (190.0f32 * 0.5) as usize);
+    assert!(img[(cy * w + cx) * 4 + 3] < 40, "alpha in the clearing {}", img[(cy * w + cx) * 4 + 3]);
+}
+
+#[test]
+fn a_clearing_drawn_first_still_cuts_a_later_forest() {
+    let mut p = two_zones();
+    let cut = Shape::new(ShapeOp::Subtract, vec![[500.0, 100.0], [680.0, 100.0], [680.0, 280.0], [500.0, 280.0]]);
+    p.shapes.insert(0, cut);
+    let img = compose_stack(&generate_stack(&p, 0.5, &|| false).unwrap(), &p.grading, ComposeOptions::default());
+    let (w, _) = render_size(&p, 0.5);
     let (cx, cy) = ((590.0f32 * 0.5) as usize, (190.0f32 * 0.5) as usize);
     assert!(img[(cy * w + cx) * 4 + 3] < 40, "alpha in the clearing {}", img[(cy * w + cx) * 4 + 3]);
 }
@@ -1098,7 +1143,7 @@ fn editing_a_group_changes_the_render_key() {
     assert_ne!(p.render_key(), hidden);
     // the picture under the forest is not part of it
     let mut q = p.clone();
-    q.background_image = Some(BackgroundImage { path: "x.png".into(), opacity: 0.5, visible: true });
+    q.background_image = Some(BackgroundImage { path: "x.png".into(), opacity: 0.5, visible: true, ..Default::default() });
     assert_eq!(q.render_key(), p.render_key());
 }
 
@@ -1159,4 +1204,295 @@ fn no_crown_crosses_the_drawn_line_in_a_thin_zone() {
         let inside = (t.x - 60.0).min(740.0 - t.x).min(t.y - 150.0).min(270.0 - t.y);
         assert!(inside >= t.r - 1.0, "crown at ({:.0}, {:.0}) radius {:.0} reaches the line", t.x, t.y, t.r);
     }
+}
+
+#[test]
+fn canopy_weave_is_off_by_default_and_changes_the_render_when_on() {
+    let mut p = project();
+    assert_eq!(p.gen.depth.weave, 0.0);
+    let opts = ComposeOptions::default();
+    let off = compose(&generate(&p, 0.5, &|| false).unwrap(), &p.grading, opts);
+    // an explicit zero is the same picture
+    p.gen.depth.weave = 0.0;
+    assert_eq!(off, compose(&generate(&p, 0.5, &|| false).unwrap(), &p.grading, opts));
+    p.gen.depth.weave = 0.7;
+    let on = compose(&generate(&p, 0.5, &|| false).unwrap(), &p.grading, opts);
+    assert_ne!(off, on, "weave changes how crowns meet");
+    // the forest still covers about the same ground
+    let cover = |v: &Vec<u8>| v.chunks(4).filter(|px| px[3] > 8).count() as f32;
+    let (a, b) = (cover(&off), cover(&on));
+    assert!((a - b).abs() < 0.08 * a, "coverage is kept: {a} against {b}");
+    // and it is deterministic
+    assert_eq!(on, compose(&generate(&p, 0.5, &|| false).unwrap(), &p.grading, opts));
+}
+
+#[test]
+fn canopy_weave_matches_on_gpu_and_between_strips() {
+    let Some(g) = forest_core::gpu::Gpu::headless() else { return };
+    let mut p = project();
+    p.gen.depth.weave = 0.7;
+    let opts = ComposeOptions { background: Some([0.8, 0.78, 0.7]), ..Default::default() };
+    let cpu = compose(&generate(&p, 1.0, &|| false).unwrap(), &p.grading, opts);
+    let plan = forest_core::engine::plan(&p, 1.0, &|| false).unwrap();
+    let (w, h) = render_size(&p, 1.0);
+    let gpu = g.compose_rgba(&g.render(&p, &plan, 1.0, forest_core::engine::Region { x0: 0, y0: 0, w, h }), &p.grading, opts);
+    let mean = cpu.iter().zip(&gpu).map(|(a, b)| (*a as i32 - *b as i32).abs() as f64).sum::<f64>() / cpu.len() as f64;
+    assert!(mean < 0.25, "GPU differs from CPU with weave: mean {mean:.3}");
+}
+
+#[test]
+fn canopy_weave_changes_the_cache_key() {
+    let mut p = project();
+    let mut cache = RenderCache::default();
+    let a = cache.render(&p, 0.5, &|| false).unwrap();
+    p.gen.depth.weave = 0.7;
+    let b = cache.render(&p, 0.5, &|| false).unwrap();
+    let opts = ComposeOptions::default();
+    assert_ne!(compose(&a, &p.grading, opts), compose(&b, &p.grading, opts), "a cached render must not hide the weave");
+    assert_eq!(compose(&b, &p.grading, opts), compose(&generate(&p, 0.5, &|| false).unwrap(), &p.grading, opts));
+}
+
+#[test]
+fn species_saved_with_a_built_in_form_get_a_matching_tree_type() {
+    // an older file: built-in forms, no tree type, and fields that no longer exist
+    let json = r#"{"name":"Mixed","form":"Spruce","needles":true,"leaf_size":1.4,"branchiness":1.2,"preset":""}"#;
+    let mut sp: Species = serde_json::from_str(json).unwrap();
+    assert!(sp.tree_type().is_none());
+    sp.assign_tree_type();
+    assert_eq!(sp.tree_type(), Some("balsam_fir"));
+    let bush: Species = serde_json::from_str(r#"{"name":"Shrubs","form":"Bush"}"#).map(|mut s: Species| { s.assign_tree_type(); s }).unwrap();
+    assert_eq!(bush.tree_type(), Some("black_oak"));
+    // the old form is not written back
+    assert!(!serde_json::to_string(&bush).unwrap().contains("form"));
+    // a whole project from before loads and every species draws
+    let mut p = Project::default();
+    p.species[3].preset.clear();
+    p.migrate_groups();
+    assert!(p.species.iter().all(|s| s.tree_type().is_some()));
+}
+
+#[test]
+fn canopy_smoothing_is_off_by_default_and_flattens_crowns_when_on() {
+    let mut p = project();
+    assert_eq!(p.gen.depth.smooth, 0.0);
+    let opts = ComposeOptions { background: Some([0.8, 0.78, 0.7]), ..Default::default() };
+    let off = compose(&generate(&p, 1.0, &|| false).unwrap(), &p.grading, opts);
+    p.gen.depth.smooth = 0.0;
+    assert_eq!(off, compose(&generate(&p, 1.0, &|| false).unwrap(), &p.grading, opts));
+    p.gen.depth.smooth = 0.5;
+    let on = compose(&generate(&p, 1.0, &|| false).unwrap(), &p.grading, opts);
+    assert_ne!(off, on);
+    // local brightness variation between neighbouring pixels falls, while the outline stays: coverage is the same
+    let (w, _) = render_size(&p, 1.0);
+    let roughness = |v: &Vec<u8>| -> f64 {
+        let l = |i: usize| 0.299 * v[i * 4] as f64 + 0.587 * v[i * 4 + 1] as f64 + 0.114 * v[i * 4 + 2] as f64;
+        (0..v.len() / 4 - 1).filter(|i| i % w != w - 1).map(|i| (l(i) - l(i + 1)).abs()).sum::<f64>() / (v.len() / 4) as f64
+    };
+    assert!(roughness(&on) < roughness(&off), "smoothing reduces pixel to pixel variation: {} against {}", roughness(&on), roughness(&off));
+    let cover = |v: &Vec<u8>| v.chunks(4).filter(|px| px[3] > 8).count() as f32;
+    let nobg = ComposeOptions::default();
+    let (a, b) = (cover(&compose(&generate(&project(), 1.0, &|| false).unwrap(), &p.grading, nobg)), cover(&compose(&generate(&p, 1.0, &|| false).unwrap(), &p.grading, nobg)));
+    assert!((a - b).abs() < 0.03 * a, "outline kept: {a} against {b}");
+}
+
+#[test]
+fn canopy_smoothing_matches_on_gpu_and_in_a_padded_view() {
+    let Some(g) = forest_core::gpu::Gpu::headless() else { return };
+    use forest_core::engine::Region;
+    let mut p = project();
+    p.gen.depth.smooth = 0.6;
+    let opts = ComposeOptions { background: Some([0.8, 0.78, 0.7]), ..Default::default() };
+    let cpu = compose(&generate(&p, 1.0, &|| false).unwrap(), &p.grading, opts);
+    let plan = forest_core::engine::plan(&p, 1.0, &|| false).unwrap();
+    let (w, h) = render_size(&p, 1.0);
+    let full = g.compose_rgba(&g.render(&p, &plan, 1.0, Region { x0: 0, y0: 0, w, h }), &p.grading, opts);
+    let mean = cpu.iter().zip(&full).map(|(a, b)| (*a as i32 - *b as i32).abs() as f64).sum::<f64>() / cpu.len() as f64;
+    assert!(mean < 0.35, "GPU differs from CPU with smoothing: mean {mean:.3}");
+    // a padded window agrees with the full render, so tiles and strips have no seams
+    let pad = forest_core::view_pad(&p, &plan, 1.0);
+    let (cx0, cy0, cx1, cy1) = (w / 4, h / 4, w * 3 / 4, h * 3 / 4);
+    let (x0, y0) = (cx0.saturating_sub(pad), cy0.saturating_sub(pad));
+    let (x1, y1) = ((cx1 + pad).min(w), (cy1 + pad).min(h));
+    let region = Region { x0, y0, w: x1 - x0, h: y1 - y0 };
+    let part = g.compose_rgba(&g.render(&p, &plan, 1.0, region), &p.grading, opts);
+    let (mut worst, mut sum, mut n) = (0, 0f64, 0usize);
+    for y in cy0..cy1 {
+        for x in cx0..cx1 {
+            for c in 0..4 {
+                let a = full[(y * w + x) * 4 + c] as i32;
+                let b = part[((y - y0) * region.w + (x - x0)) * 4 + c] as i32;
+                worst = worst.max((a - b).abs());
+                sum += (a - b).abs() as f64;
+                n += 1;
+            }
+        }
+    }
+    assert!(worst <= 8 && sum / (n as f64) < 0.05, "viewport differs with smoothing: worst {worst}, mean {:.4}", sum / n as f64);
+}
+
+#[test]
+fn canopy_smoothing_changes_the_cache_key() {
+    let mut p = project();
+    let mut cache = RenderCache::default();
+    let a = cache.render(&p, 0.5, &|| false).unwrap();
+    p.gen.depth.smooth = 0.5;
+    let b = cache.render(&p, 0.5, &|| false).unwrap();
+    let opts = ComposeOptions::default();
+    assert_ne!(compose(&a, &p.grading, opts), compose(&b, &p.grading, opts), "a cached render must not hide the smoothing");
+    assert_eq!(compose(&b, &p.grading, opts), compose(&generate(&p, 0.5, &|| false).unwrap(), &p.grading, opts));
+}
+
+fn trees_of(p: &Project) -> Vec<forest_core::TreeRec> {
+    generate(p, 0.5, &|| false).unwrap().trees
+}
+
+#[test]
+fn drawing_a_new_zone_leaves_the_trees_of_the_old_one_alone() {
+    let mut p = two_zones();
+    p.shapes.pop();
+    let before = trees_of(&p);
+    p.shapes.push(Shape::new(ShapeOp::Add, vec![[440.0, 40.0], [740.0, 40.0], [740.0, 340.0], [440.0, 340.0]]));
+    let after = trees_of(&p);
+    // inside the first zone, away from its edge, every tree is still there with the same look
+    let inner: Vec<&forest_core::TreeRec> = before.iter().filter(|t| t.x > 90.0 && t.x < 270.0 && t.y > 100.0 && t.y < 280.0).collect();
+    assert!(inner.len() > 20, "the zone has trees: {}", inner.len());
+    for t in inner {
+        let same = after.iter().any(|a| (a.x - t.x).abs() < 0.01 && (a.y - t.y).abs() < 0.01 && a.seed == t.seed && (a.r - t.r).abs() < 0.01);
+        assert!(same, "tree at {:.1},{:.1} changed", t.x, t.y);
+    }
+}
+
+#[test]
+fn clustering_makes_trees_gather_with_open_ground_between() {
+    let mut p = Project { map_w: 1000, map_h: 1000, ..Default::default() };
+    p.shapes.push(Shape::new(ShapeOp::Add, vec![[20.0, 20.0], [980.0, 20.0], [980.0, 980.0], [20.0, 980.0]]));
+    p.gen.canopy_cover = 0.9;
+    // how unevenly trees fall into 100 px cells: variance over mean of the counts
+    let dispersion = |p: &Project| {
+        let t = trees_of(p);
+        let mut cells = [0f32; 100];
+        for r in t.iter().filter(|r| r.layer == forest_core::TreeLayer::Canopy && r.x > 150.0 && r.x < 850.0 && r.y > 150.0 && r.y < 850.0) {
+            cells[((r.y / 100.0) as usize).min(9) * 10 + ((r.x / 100.0) as usize).min(9)] += 1.0;
+        }
+        let inner: Vec<f32> = (1..9).flat_map(|y| (1..9).map(move |x| (y * 10 + x))).map(|i| cells[i]).collect();
+        let mean = inner.iter().sum::<f32>() / inner.len() as f32;
+        let var = inner.iter().map(|c| (c - mean).powi(2)).sum::<f32>() / inner.len() as f32;
+        var / mean.max(1e-3)
+    };
+    let even = dispersion(&p);
+    p.gen.clump = 0.8;
+    p.gen.clump_size = 60.0;
+    let clustered = dispersion(&p);
+    assert!(clustered > even * 1.5, "clustered {clustered} vs even {even}");
+}
+
+#[test]
+fn leaning_crowns_move_toward_open_space() {
+    let mut p = Project { map_w: 600, map_h: 600, ..Default::default() };
+    p.shapes.push(Shape::new(ShapeOp::Add, vec![[20.0, 20.0], [580.0, 20.0], [580.0, 580.0], [20.0, 580.0]]));
+    p.gen.canopy_cover = 1.0;
+    // crowds push outward at the edge of a stand, where the open space is: the mean distance from the middle grows
+    let reach = |p: &Project| {
+        let t: Vec<_> = trees_of(p).into_iter().filter(|r| r.layer == forest_core::TreeLayer::Canopy).collect();
+        t.iter().map(|r| (r.x - 300.0).hypot(r.y - 300.0)).sum::<f32>() / t.len() as f32
+    };
+    let before = reach(&p);
+    p.gen.crown_lean = 1.0;
+    let after = reach(&p);
+    assert!(after > before + 0.3, "crowns lean outward: {before} -> {after}");
+}
+
+#[test]
+fn occlusion_glow_and_lumps_change_the_picture_and_are_off_by_default() {
+    let base = project();
+    let render = |p: &Project| compose(&generate(p, 1.0, &|| false).unwrap(), &p.grading, ComposeOptions::default());
+    let a = render(&base);
+    assert_eq!(a, render(&base), "off by default means nothing changes");
+    for (name, set) in [("canopy_ao", 0), ("translucency", 1), ("lumps", 2)] {
+        let mut p = base.clone();
+        match set {
+            0 => p.gen.depth.canopy_ao = 1.0,
+            1 => p.gen.depth.translucency = 1.0,
+            _ => p.gen.depth.lumps = 1.0,
+        }
+        let b = render(&p);
+        let diff = a.iter().zip(&b).filter(|(x, y)| x != y).count();
+        assert!(diff > 500, "{name} changes the picture: {diff} bytes differ");
+    }
+}
+
+#[test]
+fn exports_in_every_format_with_the_right_size() {
+    use forest_core::render::{export_strips_as, ExportFormat};
+    let mut p = Project { map_w: 1500, map_h: 1100, ..Default::default() };
+    p.shapes.push(Shape::new(ShapeOp::Add, vec![[100.0, 100.0], [1400.0, 100.0], [1400.0, 1000.0], [100.0, 1000.0]]));
+    let dir = std::env::temp_dir().join(format!("forest_export_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let opts = ComposeOptions { background: Some([0.8, 0.78, 0.7]), ..Default::default() };
+    for fmt in ExportFormat::ALL {
+        let path = dir.join(format!("m.{}", fmt.extension().unwrap_or("png")));
+        export_strips_as(&p, 0.5, &[(path.clone(), opts)], fmt, &|| false, &mut |_| {}).unwrap_or_else(|e| panic!("{fmt:?}: {e}"));
+        match fmt {
+            ExportFormat::Tiles => {
+                let index: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("m").join("m_tiles.json")).unwrap()).unwrap();
+                assert_eq!((index["width"].as_u64(), index["height"].as_u64()), (Some(750), Some(550)));
+                // 750 x 550 fits one tile; check it holds the whole picture
+                let tile = std::fs::read(dir.join("m").join("m_x0_y0.png")).unwrap();
+                let dec = png::Decoder::new(std::io::Cursor::new(tile)).read_info().unwrap();
+                assert_eq!((dec.info().width, dec.info().height), (750, 550));
+            }
+            _ => {
+                let bytes = std::fs::read(&path).unwrap();
+                assert!(bytes.len() > 1000, "{fmt:?} wrote a picture");
+                let img = image::load_from_memory(&bytes).unwrap_or_else(|e| panic!("{fmt:?}: {e}"));
+                assert_eq!((img.width(), img.height()), (750, 550), "{fmt:?}");
+            }
+        }
+    }
+    // a lossless format keeps every pixel of the PNG
+    let png_px = image::load_from_memory(&std::fs::read(dir.join("m.png")).unwrap()).unwrap().to_rgba8();
+    let webp_px = image::load_from_memory(&std::fs::read(dir.join("m.webp")).unwrap()).unwrap().to_rgba8();
+    assert_eq!(png_px.as_raw(), webp_px.as_raw(), "lossless WebP equals the PNG");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn stand_age_grows_crowns_along_a_curve_and_never_past_the_real_maximum() {
+    let mut p = Project { map_w: 900, map_h: 900, ..Default::default() };
+    p.shapes.push(Shape::new(ShapeOp::Add, vec![[40.0, 40.0], [860.0, 40.0], [860.0, 860.0], [40.0, 860.0]]));
+    p.gen.crown_min = 4.0;
+    p.gen.crown_max = 6.5;
+    p.gen.canopy_cover = 1.0;
+    let preset = p.species[p.gen.main_species as usize].preset.clone();
+    let cap = forest_core::age::max_crown_px(&preset);
+    let mean_r = |p: &Project| {
+        let t: Vec<_> = trees_of(p).into_iter().filter(|r| r.layer == forest_core::TreeLayer::Canopy).collect();
+        assert!(!t.is_empty());
+        (t.iter().map(|r| r.r).sum::<f32>() / t.len() as f32, t.iter().map(|r| r.r).fold(0.0f32, f32::max))
+    };
+    let at = |age: f32| {
+        let mut q = p.clone();
+        q.gen.age = age;
+        mean_r(&q)
+    };
+    let (young, _) = at(8.0);
+    let (middle, _) = at(40.0);
+    let (old, old_max) = at(250.0);
+    let (ancient, ancient_max) = at(5000.0);
+    assert!(young < middle && middle < old, "crowns grow: {young} {middle} {old}");
+    // a thousand years later the crowns are no bigger than the type's real largest, even if the settings ask for giants
+    assert!(ancient_max <= cap + 0.01 && old_max <= cap + 0.01, "capped at {cap}: {old_max} {ancient_max}");
+    let mut giants = p.clone();
+    giants.gen.crown_min = 60.0;
+    giants.gen.crown_max = 150.0;
+    giants.gen.age = 1000.0;
+    assert!(mean_r(&giants).1 <= cap + 0.01, "settings cannot lift the cap");
+    assert!((ancient - old).abs() < cap * 0.15, "the growth curve levels off: {old} vs {ancient}");
+    // a young stand has more shrubs than an old one
+    let shrubs = |age: f32| {
+        let mut q = p.clone();
+        q.gen.age = age;
+        trees_of(&q).iter().filter(|r| r.layer == forest_core::TreeLayer::Shrub).count()
+    };
+    assert!(shrubs(8.0) > shrubs(250.0), "young stands are full of shrubs");
 }

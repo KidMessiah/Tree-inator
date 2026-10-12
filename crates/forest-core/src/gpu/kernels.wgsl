@@ -527,15 +527,20 @@ fn tone_noise(x: f32, y: f32, size0: f32, sd: u32) -> f32 {
     return (0.55 * a + 0.35 * b + 0.2 * c) / 0.12;
 }
 
-fn sprite_color(gx: u32, gy: u32, nx: f32, ny: f32, depth0: f32, tone: f32, tree_tone: f32, cls: u32, hb: f32, b3: f32, b9: f32, bx: f32, by: f32, rel: f32, sp: u32, recol: vec3<f32>) -> vec3<f32> {
+fn sprite_color(gx: u32, gy: u32, nx: f32, ny: f32, depth0: f32, tone: f32, tree_tone: f32, cls: u32, hb: f32, b3: f32, b9: f32, bx: f32, by: f32, lx: f32, ly: f32, rel: f32, sp: u32, recol: vec3<f32>) -> vec3<f32> {
     let s = p_s();
     let lv = vec3<f32>(p_lvx(), p_lvy(), p_lvz());
-    let n = sqrt(nx * nx + ny * ny + 1.0);
+    let nxl = nx - p_lumps() * 2.0 * lx;
+    let nyl = ny - p_lumps() * 2.0 * ly;
+    let n = sqrt(nxl * nxl + nyl * nyl + 1.0);
     var diff = 0.63;
     if p_flat() == 0u {
-        diff = clamp((nx * lv.x + ny * lv.y + lv.z) / n, 0.0, 1.0);
+        diff = clamp((nxl * lv.x + nyl * lv.y + lv.z) / n, 0.0, 1.0);
     }
-    let ao = clamp(1.0 - max(b3 - hb, 0.0) / (6.0 * s), 0.0, 1.0) * clamp(1.0 - max(b9 - hb, 0.0) / (18.0 * s), 0.0, 1.0);
+    var ao = clamp(1.0 - max(b3 - hb, 0.0) / (6.0 * s), 0.0, 1.0) * clamp(1.0 - max(b9 - hb, 0.0) / (18.0 * s), 0.0, 1.0);
+    if p_canopy_ao() > 0.0 {
+        ao = pow(ao, 1.0 + 2.0 * p_canopy_ao()) * clamp(1.0 + p_canopy_ao() * 0.9 * min(rel, 0.0), 0.3, 1.0);
+    }
     if RAMP[sp * 5u + 4u].w > 0.5 {
         // colours baked into the sprite: only light them
         let shade = (0.42 + 0.58 * diff) * (0.7 + 0.3 * ao);
@@ -568,6 +573,12 @@ fn sprite_color(gx: u32, gy: u32, nx: f32, ny: f32, depth0: f32, tone: f32, tree
         t += (value(mx / ms, my / ms, sd + 91u) - 0.5) * 0.45 * p_mottling() * 0.5;
     }
     var c = ramp_color(sp, t) * shade * recol;
+    if p_translucency() > 0.0 {
+        let thin = pow(1.0 - depth, 0.8);
+        let back = clamp((0.55 - diff) / 0.55, 0.0, 1.0);
+        let glow = ramp_color(sp, 0.92);
+        c += glow * (p_translucency() * thin * back * 1.6) * recol;
+    }
     if p_dappled() > 0.0 {
         let fc = clamp((-bx - by) * 0.35 / s, 0.0, 1.0) * p_dappled();
         c.x *= 1.0 + fc * 0.28;
@@ -649,7 +660,9 @@ fn k_shade_tree(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_work
         let yd = min(i32(y) + 1, i32(h) - 1);
         let bx = (f1[y * w + u32(xr)] - f1[y * w + u32(xl)]) * 0.5;
         let by = (f1[u32(yd) * w + x] - f1[u32(yu) * w + x]) * 0.5;
-        c = sprite_color(x + p_ox(), y + p_oy(), tnx, tny, spr_depth, spr_tone, tree_tone, cls, hb, f2[i], f3[i], bx, by, rel, sp, recol);
+        let lx = (f2[y * w + u32(xr)] - f2[y * w + u32(xl)]) * 0.5;
+        let ly = (f2[u32(yd) * w + x] - f2[u32(yu) * w + x]) * 0.5;
+        c = sprite_color(x + p_ox(), y + p_oy(), tnx, tny, spr_depth, spr_tone, tree_tone, cls, hb, f2[i], f3[i], bx, by, lx, ly, rel, sp, recol);
     } else {
         // the thin edge just outside a tree: a dark rim in the colours of the tree beside it
         var sp = 0u;
@@ -800,6 +813,82 @@ fn layer_px(acc: vec4<f32>, l: u32, cw0: u32, cw1: u32, shadow: f32) -> vec4<f32
         c = c * (1.0 - G.v[25].w * 0.92 * shadow);
     }
     return blend(acc, c, a);
+}
+
+// ------------------------------------------------------------------ canopy smoothing (smooth.rs)
+
+// premultiplied colour and alpha of a packed layer colour pixel
+fn sm_load(x: i32, y: i32) -> vec4<f32> {
+    let i = u32(y) * p_w() + u32(x);
+    let a = unpack2x16float(u0[2u * i]);
+    let b = unpack2x16float(u0[2u * i + 1u]);
+    return vec4<f32>(a.x * b.y, a.y * b.y, b.x * b.y, b.y);
+}
+
+// Kuwahara: each pixel takes the mean of the flattest of its four quadrants. u0 in, u1 out; S.u.x window size.
+@compute @workgroup_size(256)
+fn k_smooth(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
+    let i = flat_index(gid, nwg);
+    let w = p_w();
+    if i >= w * p_h() {
+        return;
+    }
+    let x = i32(i % w);
+    let y = i32(i / w);
+    let r = i32(S.u.x);
+    var best_var = 1e30;
+    var best = vec4<f32>(0.0);
+    for (var q = 0; q < 4; q++) {
+        var x0 = x - r;
+        var x1 = x;
+        var y0 = y - r;
+        var y1 = y;
+        if (q & 1) == 1 {
+            x0 = x;
+            x1 = x + r;
+        }
+        if q >= 2 {
+            y0 = y;
+            y1 = y + r;
+        }
+        x0 = max(x0, 0);
+        y0 = max(y0, 0);
+        x1 = min(x1, i32(w) - 1);
+        y1 = min(y1, i32(p_h()) - 1);
+        var s = vec4<f32>(0.0);
+        var slp = 0.0;
+        var slp2 = 0.0;
+        var sa2 = 0.0;
+        for (var yy = y0; yy <= y1; yy++) {
+            for (var xx = x0; xx <= x1; xx++) {
+                let v = sm_load(xx, yy);
+                let lp = 0.299 * v.x + 0.587 * v.y + 0.114 * v.z;
+                s += v;
+                slp += lp;
+                slp2 += lp * lp;
+                sa2 += v.w * v.w;
+            }
+        }
+        let n = f32((x1 - x0 + 1) * (y1 - y0 + 1));
+        let mlp = slp / n;
+        let ma = s.w / n;
+        let variance = (slp2 / n - mlp * mlp) + 0.25 * (sa2 / n - ma * ma);
+        if variance < best_var {
+            best_var = variance;
+            best = s / n;
+        }
+    }
+    let a = best.w;
+    var rgb = vec3<f32>(0.0);
+    if a > 1e-4 {
+        rgb = best.xyz / a;
+    } else {
+        let o = unpack2x16float(u0[2u * i]);
+        let p = unpack2x16float(u0[2u * i + 1u]);
+        rgb = vec3<f32>(o.x, o.y, p.x);
+    }
+    u1[2u * i] = pack2x16float(rgb.xy);
+    u1[2u * i + 1u] = pack2x16float(vec2<f32>(rgb.z, a));
 }
 
 // f0 haze alpha, f1 ground shadow, f2..f6 shadows on grass, shrubs, canopy, lone trees, pebbles; u0..u4

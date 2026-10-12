@@ -10,7 +10,7 @@
 
 use super::Tree;
 use crate::params::{GenParams, Species};
-use crate::wp::Sprite;
+use crate::sprite::Sprite;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -139,7 +139,7 @@ fn profile(sprite: &Sprite, r0: f32, orient: u32) -> [f32; SECTORS] {
 fn tree_profile(t: &Tree, sp: &Species) -> [f32; SECTORS] {
     let orient = ((t.seed >> 8) % 8) as u32;
     let variant = (t.seed % crate::treegen_sprite::VARIANTS as u64) as u32;
-    let Some(ty) = sp.tree_type(false) else { return [1.2; SECTORS] };
+    let Some(ty) = sp.tree_type() else { return [1.2; SECTORS] };
     let key = (ty.to_string(), variant, orient, sp.canopy_fill.to_bits());
     let cache = PROFILES.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(p) = cache.lock().unwrap().get(&key) {

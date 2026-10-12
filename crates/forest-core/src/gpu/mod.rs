@@ -18,7 +18,7 @@ const U_PARAMS: &[&str] = &[
 const F_PARAMS: &[&str] = &[
     "s", "inv", "map_w", "map_h", "lvx", "lvy", "lvz", "soft", "fall", "rel_scale", "variety", "mottling", "mottle_size", "dappled",
     "tree_lean", "crown_tone", "crown_tone_size", "crown_shade", "cluster_tone", "depth_strength", "gamma", "gain", "crown_var",
-    "snow_amount", "snow_ground", "snow_tops", "snow_reach", "snow_c", "snow_s", "snow_patch", "snow_r", "snow_g", "snow_b",
+    "canopy_ao", "translucency", "lumps", "snow_amount", "snow_ground", "snow_tops", "snow_reach", "snow_c", "snow_s", "snow_patch", "snow_r", "snow_g", "snow_b",
     "fire_amount", "fire_flames", "fire_char", "fire_embers", "fire_glow", "fire_reach", "fire_c", "fire_s", "fire_patch", "grass_r",
     "grass_g", "grass_b", "acc_r", "acc_g", "acc_b", "feather", "plan_s", "ins_cs", "band", "edge_warp", "edge_noise", "pattern_k",
     "pattern_sc", "pattern_scale_raw", "branch_width", "haze_reach", "haze_opacity", "grass_reach", "grass_density",
@@ -30,7 +30,7 @@ const WG: u32 = 256;
 const ENTRIES: &[&str] = &[
     "k_top", "k_horizon", "k_shadow_raw", "k_box_h", "k_box_v", "k_down2", "k_up2", "k_mask", "k_clip", "k_glow_src", "k_shade_tree",
     "k_grass", "k_compose", "k_stamp_z", "k_stamp_win", "k_stamp_attr", "k_depth_coarse", "k_upsample", "k_haze", "k_grass_imp",
-    "k_grass_a", "k_area",
+    "k_grass_a", "k_area", "k_smooth",
 ];
 
 fn n_param_vec4() -> usize {
@@ -144,7 +144,7 @@ struct Atlas {
 
 impl Atlas {
     fn build(gpu: &Gpu, layers: Vec<Vec<crate::engine::SpriteInstance>>) -> Atlas {
-        let mut at: HashMap<*const crate::wp::Sprite, u32> = HashMap::new();
+        let mut at: HashMap<*const crate::sprite::Sprite, u32> = HashMap::new();
         let (mut z, mut w, mut c) = (Vec::new(), Vec::new(), Vec::new());
         let mut out = Vec::new();
         for layer in &layers {
@@ -167,6 +167,8 @@ impl Atlas {
                 let template = (q.painted as u32) << 7 | (q.species as u32) << 8 | (q.tone as u16 as u32) << 16;
                 let mut word = [0u32; 16];
                 word[..7].copy_from_slice(&[q.x0 as u32, q.y0 as u32, off, sp.size as u32, q.k | (q.flip as u32) << 2, q.zs.to_bits(), template]);
+                word[14] = q.top.to_bits();
+                word[15] = q.weave.to_bits();
                 if let Some(f) = &q.fac {
                     word[7] = 1;
                     word[8..14].copy_from_slice(&crate::engine::shy_pack(f));
@@ -646,6 +648,9 @@ impl Gpu {
             ("gamma", ds.gamma),
             ("gain", ds.gain),
             ("crown_var", ds.crown_var),
+            ("canopy_ao", ds.canopy_ao),
+            ("translucency", ds.translucency),
+            ("lumps", ds.lumps),
         ] {
             p.f(k, v);
         }
@@ -803,7 +808,7 @@ impl Gpu {
         let area = if clip_on {
             let mut mask = crate::field::Field::new(w, h);
             let (ox, oy) = (region.x0 as f32, (region.y0 + y0) as f32);
-            for shape in &project.shapes {
+            for shape in project.shapes_clearings_last() {
                 let pts: Vec<[f32; 2]> = shape.points.iter().map(|p| [p[0] * scale - ox, p[1] * scale - oy]).collect();
                 crate::engine::fill_polygon(&mut mask, &pts, if shape.op == ShapeOp::Add { 1.0 } else { 0.0 });
             }
@@ -901,11 +906,13 @@ impl Gpu {
         self.run(enc, g0, "k_clip", step_u([clip_on as u32, 0, 0, 0]), n, &[(0, &inp.haze_a), (1, &inp.area), (2, &haze)], &[], None);
         let ground = if realistic { shadow_for(enc, 0, None, None) } else { None };
 
+        let smooth_r = crate::smooth::radius(g.depth.smooth, 0.5 * (g.crown_min + g.crown_max) * s);
         // grass
         let mut colors = Vec::new();
         let mut shadows = Vec::new();
         let grass_col = self.buffer(2 * n, "grass colour");
         self.run(enc, g0, "k_grass", Step::default(), n, &[(0, &inp.grass_a), (7, &glow), (8, &inp.depth), (9, &inp.area)], &[(2, &grass_col)], None);
+        let grass_col = self.smooth_colours(enc, g0, grass_col, n, smooth_r);
         colors.push(grass_col);
         shadows.push(if realistic { shadow_for(enc, 2, Some(&inp.grass_a), Some(&inp.grass_a)) } else { None });
 
@@ -937,6 +944,7 @@ impl Gpu {
                 &[(0, &inp.w1[j]), (1, &inp.w2[j]), (2, &col)],
                 None,
             );
+            let col = self.smooth_colours(enc, g0, col, n, smooth_r);
             colors.push(col);
             shadows.push(shadow_for(enc, 1, Some(hb), Some(&alpha)));
         }
@@ -955,6 +963,16 @@ impl Gpu {
             colors,
             shadows,
         }
+    }
+
+    /// Canopy smoothing of one layer's packed colours, or the colours as they are when it is off.
+    fn smooth_colours(&self, enc: &mut wgpu::CommandEncoder, g0: &wgpu::BindGroup, col: wgpu::Buffer, n: usize, r: usize) -> wgpu::Buffer {
+        if r == 0 {
+            return col;
+        }
+        let out = self.buffer(2 * n, "smoothed colour");
+        self.run(enc, g0, "k_smooth", step_u([r as u32, 0, 0, 0]), n, &[], &[(0, &col), (1, &out)], None);
+        out
     }
 
     /// The grading block for `k_compose`.

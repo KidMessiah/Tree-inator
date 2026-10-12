@@ -29,6 +29,9 @@ pub struct Group {
     pub visible: bool,
     /// Shown folded in the list.
     pub collapsed: bool,
+    /// A locked group cannot be edited by accident, and neither can what is in it.
+    #[serde(default)]
+    pub locked: bool,
     /// The settings this group changes, a sparse nested copy of `GenParams`. Null for none.
     pub overrides: Value,
     /// This group's own species list. The three species indexes in the settings come with it.
@@ -40,7 +43,7 @@ pub struct Group {
 
 impl Default for Group {
     fn default() -> Self {
-        Group { id: 0, parent: None, name: String::new(), visible: true, collapsed: false, overrides: Value::Null, species: None, settings: None }
+        Group { id: 0, parent: None, name: String::new(), visible: true, collapsed: false, locked: false, overrides: Value::Null, species: None, settings: None }
     }
 }
 
@@ -198,11 +201,6 @@ impl Project {
         let mut out = Vec::new();
         walk(self, None, &mut out, 0);
         out
-    }
-
-    /// The zones directly in a group.
-    pub fn zones_in(&self, id: u32) -> usize {
-        self.shapes.iter().filter(|s| s.group == Some(id)).count()
     }
 
     /// The zones in a group and in the groups inside it.
@@ -368,10 +366,17 @@ impl Project {
         }
     }
 
-    /// Bring a project from an older file up to date: zones that carried their own settings, groups that held
+    /// Bring a project from an older file up to date: species without a tree type, zones that carried their own settings, groups that held
     /// a full copy of the settings, and groups numbered by position. Layers from the version that had both
     /// layers and groups are groups now, and keep their zones.
     pub fn migrate_groups(&mut self) {
+        // species from before every tree had a procedural type get one by name
+        self.species.iter_mut().for_each(Species::assign_tree_type);
+        for n in self.groups.iter_mut() {
+            if let Some(v) = n.species.as_mut() {
+                v.iter_mut().for_each(Species::assign_tree_type);
+            }
+        }
         // groups saved before they had ids are numbered from 1 by position, and zones pointed by position
         if !self.groups.is_empty() && self.groups.iter().all(|n| n.id == 0) {
             for (i, n) in self.groups.iter_mut().enumerate() {

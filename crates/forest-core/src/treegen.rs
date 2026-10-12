@@ -1,4 +1,4 @@
-//! Parametric tree generator after Weber and Penn, ported from friggog/tree-gen (Chris Hewitt, 2017), the
+//! Parametric tree generator after Weber and Penn, ported from friggog/tree-gen (Charlie Hewitt, 2017), the
 //! implementation described in his dissertation. The original is a Blender add-on in Python, GPL-3.0; this is a
 //! line by line port of `parametric/gen.py`, `chturtle.py` and `leaf.py` to Rust, without Blender.
 //! Because it derives from GPL code, anything built with it is GPL-3.0 if it is distributed.

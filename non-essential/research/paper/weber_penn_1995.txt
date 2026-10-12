@@ -1,0 +1,830 @@
+                                        Creation and Rendering of Realistic Trees
+
+                                                                    Jason Weber1                 Joseph Penn2
+
+                                        Teletronics International, Inc. Army Research Laboratory
+
+"From such small beginnings - a mere grain of dust,                                    The model must be capable of creating a wide variety of actual tree types
+
+as it were - do mighty trees take their rise."                                         and related vegetation such as shrubs, bushes, and palms, as well as cacti
+
+                          Henry David Thoreau from "Faith in a Seed"                   and even large grasses. Shrubs, for example, can be easily simulated with
+
+                                                                                       the model since they really only differ from trees in that they are usually
+
+ABSTRACT                                                                               shorter and have multiple trunks originating directly from the ground
+
+                                                                                       [REIL91]. The model must be able to handle random parameters so that a
+
+Recent advances in computer graphics have produced images approaching very large number of structural variations can be generated from the design
+the elusive goal of photorealism. Since many natural objects are so specifications of a particular tree species. It should also implement time-
+complex and detailed, they are often not rendered with convincing fidelity dependent oscillations due to wind and other perturbations.
+                                                                                       Use of the model must be understandable by a common user with only
+due to the difficulties in succinctly defining and efficiently rendering their
+geometry. With the increased demand of future simulation and virtual a general knowledge of basic geometry, such as directly observable angles
+reality applications, the production of realistic natural-looking background and lengths. This excludes the use of any model parameters requiring
+                                                                                       understanding of difficult principles such as differential equations.
+objects will become increasingly more important.
+We present a model to create and render trees. Our emphasis is on the Likewise, the model must be stable and easy to use. User-entered free-form
+overall geometrical structure of the tree and not a strict adherence to equations could easily cause unpredictable behavior. Aspects of the model
+botanical principles. Since the model must be utilized by general users, it that may be difficult to control should be isolated from the user and be
+does not require any knowledge beyond the principles of basic geometry. represented by intuitive parameters. However, the model should not be
+We also explain a method to seamlessly degrade the tree geometry at long constrained in a way that interferes with the user's freedom of design.
+                                                                                       The specification for the tree must be compact and be able to recreate
+ranges to optimize the drawing of large quantities of trees in forested areas.
+                                                                                       and render the tree geometry efficiently. This includes the ability to
+
+1 INTRODUCTION                                                                         degrade geometry to low resolution at long ranges, where increased speed
+                                                                                       is necessary to render large forested areas. Any degradation must use
+
+Historically, much of the effort in computer graphics has been directed                negligible overhead and be seamless, even in dynamic simulations where
+toward rendering precisely defined geometrical shapes such as manufactured             ranges to trees are continuously changing.
+objects whose geometry must be clear-cut and well-defined. CAD tools that
+are often used to design these objects can also be used to specify the                      This model was designed to successfully meet these criteria. We
+geometrical properties in terms of simpler surfaces or solid geometric                 demonstrate the tree model in our natural environment scene generator. We
+primitives. The complexity of many objects is generally low enough to                  have developed a compact but varied library of specification files for
+allow complex lighting and ray-tracing computations that approach                      generating trees that are used in simulating a wide variety of landscapes.
+photorealism.
+                                                                                            The following section briefly discusses other tree models. The third
+     Natural objects offer a more profound challenge. A hillside may                   section gives an overview of our observations of trees. The fourth section
+contain hundreds of trees, billions of grass blades, and countless rocks,              goes into the specific details and equations explaining how our parameters
+pebbles, and ground variations. Each tree may easily be characterized by               are used to create the geometric description. The fifth section explains our
+hundreds of thousands of leaves and thousands of branches, branchlets, and             method of drawing optimally-degraded instances of the trees at longer
+stems oriented in complex directions. A complex landscape could require                ranges. The sixth section is a very short description of our project and how
+an unimaginable large number of polygons to define every minute facet.                 we use the trees in our application. An appendix includes a listing of our
+                                                                                       parameters and four sample tree specifications.
+
+As a result, complex natural backgrounds containing vegetation are often               2 PREVIOUS MODELS
+neglected in high quality image generation and scene simulation because of
+
+the difficulty of properly defining and rendering them in a reasonable time.           We will make some comparisons and contrasts to other tree models here
+Emphasis is placed on the buildings, vehicles, and assorted manufactured               and throughout the paper. We cannot fully explain the previous work in
+objects that are often the focus of the dominant action in a scene. Because            this space and will direct the reader to definitive references.
+of speed requirements, two-dimensional texture-mapped trees drawn as
+rotating billboards are common today in many real-time applications, but                     Honda introduced a model using parameters to define the skeleton of
+their appearance can be objectionable. This is especially evident when a               a tree [HOND71]. He clearly illustrated the difference between the
+viewer is in motion. See [ROHL94] for examples of 2D trees. As                         monopodial and dichotomous branching. In dichotomous branching, the
+
+simulations become more realistic, the deficiencies in the background branches tend to split apart in different directions from the original.
+                                                                                       Monopodial branching tends to act similarly except that one branch
+objects become more apparent.
+We present a model to create and render trees. In designing this model, continues inline from the original. Honda assumes that monopodial
+we have set guidelines focused on the requirements of scene simulation. branching is a special case concerning structures that are parallel to the line
+The foremost requirement is the appropriate level of resolution and quality. of gravity.
+                                                                                       Lindenmayer introduced a string rewriting system [LIND68] for cellular
+For items to appear realistic in a dynamic simulation, the viewer must get
+the proper sense of rotational as well as translational motion when passing interaction commonly called the L-system. This is later applied to plants
+                                                                                       and trees and is extensively described in his book with Prusinkiewicz
+or circling objects.
+Realism also depends on the accuracy of textural effects due to leaves [PRUS90] which describes the system with a few extensions, such as
+and branches within the tree shadowing each other at various times of the allowing for context-sensitivity and random variations. Basically, the string
+day. Therefore, all trees must be three-dimensional. Fortunately, as starts with a seed of a single character. A set of rules defines how to
+background objects, trees would rarely be taller than 5 to 20 percent of substitute characters during an iteration of rewriting. Presumably, any one
+screen height. Therefore, fine details such as leaf curvature and vein character may be converted into several characters. This process is
+structure are not important. But, a tree's branch structure must be very continued iteratively and the string grows. After a designated number of
+accurate at this resolution. Leaves do not completely conceal the underlying iterations, these strings can be interpreted as geometric commands. Rules
+                                                                                       can be selected to produce the monopodial or dichotomous branching, as
+branches of dormant or sparsely foliated trees.
+                                                                                       desired.
+
+                                                                                       Aono and Kunii stated that the L-system was not capable of producing
+
+1 weber@teleport.com, now employed at Dynamics Research Corporation complex three-dimensional patterns of branching [AONO84]. They
+                                                                                       demonstrated their models which also introduced interesting features such
+2 joseph@belvior-arl-irisgt.army.mil
+                                                                                       as attraction, inhibition, and statistical variations of angles. They made a
+Permission to make digital/hard copy of part or all of this work
+
+for personal or classroom use is granted without fee provided
+
+that copies are not made or distributed for profit or commercial
+
+advantage, the copyright notice, the title of the publication and
+
+its date appear, and notice is given that copying is by permission                119
+of ACM, Inc. To copy otherwise, to republish, to post on
+servers, or to redistribute to lists, requires prior specific
+
+permission and/or a fee.
+
+©1995 ACM-0-89791-701-4/95/008...$3.50
+detailed evaluation of the arrangement of branches or leaves on a parent              Wind causes complex oscillatory motion throughout the tree that varies
+stem. Prusinkiewicz and Lindenmayer's book, printed later, argued that           in amplitude and frequency determined by the length and thickness of the
+Aono and Kunii's rejection of the L-system was no longer justified based         trunk and branches.
+on their recent improvements.
+                                                                                      These are the characteristics we have observed and incorporated into
+     Oppenheimer used fractals to form trees. He used parameters such as         our model. We model enough of the significant effects that a great variety
+branching angle, branch-to-parent size ratio, stem taper rates, helical twist,   of trees and related objects can be incorporated into any simulation that
+and branches per stem segment. These specifications resemble our                 requires natural environments. Plate 1 shows twenty-four trees rendered
+approach. The Oppenheimer model, however, following the fractal theory           with the model.
+of self-similarity, uses the same specifications for every recursive level. He
+introduces random variations to alleviate some of the self-similarity            4 TREE CREATION
+[OPPE86]. We believe the self-similarity of fractals to be an unnecessary
+constraint that limits models to a relatively small number of basic trees.       The appendix lists most of the parameters currently used by our tree model.
+Oppenheimer's images appear to be influenced by Bloomenthal whose paper          It will be used for reference throughout this paper. For the benefit of
+concentrated on the quality of the surface geometry assuming that a              readers who wish to experiment with the demo program, the intuitive multi-
+reasonable tree skeleton exists [BLOO85]. Bloomenthal splined between            character variable names used in the parameter files will also be used in the
+points on the skeleton and used a ramiform to represent branch splitting.        equations throughout this paper. We should stress that many of these
+He also used a bark texture map created from a digitized x-ray of a plaster      parameters have standard botanical names which we have neglected. We
+cast. However, such detail is only useful when the tree is viewed at very        are not trying to create a new convention, but merely attempting to clarify
+close ranges.                                                                    the meanings of the parameters using simple geometric names recognized
+                                                                                 by our potential end users. Many of the parameters are repeated for each
+     Reeves and Blau created trees and grasses by utilizing a particle system    level of recursion to permit greater control and flexibility. Additional
+[REEV85]. They primarily emphasized the forest environment instead of            parameters, mostly dealing with seasonal color and lighting properties, are
+concentrating on the structural detail of individual plants. In addition, they   not listed and will not be discussed. The parameters are referred to in the
+decided to focus more on the visual results than the specific details of actual  text by name and appear as bold italic, as in Shape. Where necessary,
+botanical data. For our application, we followed similar guidelines.             parameters are prefixed by a number that distinguishes similar parameters
+                                                                                 at different levels of recursion. Generalized parameters can appear in the
+     De Reffye et al. have had impressive results with a strict botanical        text with an n prefix, such as nTaper referring to 0Taper, 1Taper, 2Taper
+model [REFF88]. Their system models growth to a certain age using                and 3Taper. This refers non-specifically to any of the like parameters.
+probabilities of death, pause, ramification, and reiteration. They admit that    Many parameters are followed by a variation parameter with the same name
+it takes a considerable knowledge of both botany and of their model to           and a 'V' suffix, such as nLength and nLengthV. The variations are usually
+create images with great fidelity to nature.                                     positive numbers indicating the magnitude of variation about the previous
+                                                                                 parameter. However, since a few special trees, like palms, require
+     Since all the models strive to achieve the same result, realistic trees,    exceptions to common trends [REIL91], some parameters use the negative
+they will all have some characteristics in common. Although our model            sign as a flag to activate a special mode. All angular parameters are
+does not draw from any of the previous models, comparisons will be made          specified in degrees. Likewise, angles in the equations are in degrees,
+for the benefit of the reader.                                                   unless otherwise stated. Except where noted, our equations describe
+                                                                                 structures based on our physical observations and research in tree reference
+3 APPROACH / OVERVIEW                                                            manuals (see References).
+
+We visualize the structure of a tree as a primary trunk consisting of a               Additionally, four trees parameter lists are given for comparison in
+variably curved structure similar to a cone. In some trees, this single          Appendix. These specifications were designed using photographs in tree
+structure may split multiple times along its length, forming additional          reference manuals. These trees, Quaking Aspen, Black Tupelo, Weeping
+similarly curved structures which can likewise split along their length          Willow, and California Black Oak, can be seen in Plates 1q, 2, 5, and 1a,
+[CHND88]. This is how we visualize dichotomous branching. The                    respectively. As trees vary widely and can be hard to identify even by
+attributes of these "clones" closely match that of the remaining length of       experts [SYMO58], these specific definitions could be used to represent
+their twin, except that they are generated using different random seeds.         many different species of trees. Figure 1 is a diagram demonstrating some
+After splitting, some will tend to curve more to compensate for the              of the parameters. It does not show a complete tree, but rather exaggerates
+directional change caused by the splitting angle.                                certain components to clarify their construction.
+
+     Monopodial or "child" branches are formed from the trunk and any            4.1 The Curved Stem
+existing clones. These branches can have entirely different attributes from
+their "parents". Many attributes, such as length, are defined relative to the    Our model is based on two elements, the stem and the leaf. We will use
+corresponding attribute of their parents. For example, a child branch's          the generic term "stem" to refer to the trunk or branches at any level of
+length is specified as a fraction of its parent's length. These branches,        recursion. The unit stem is a narrow near-conical tube whose relative z-axis
+themselves, can have sub-branches and so on. For the resolution                  is coincident with its central axis. Note that each stem has it own relative
+requirements of simulation, these levels of recursion can be generally be        coordinate system. For a main branch whose z-axis points out
+limited to three or four. It is important to point out that nearly all of the    perpendicularly to the trunk's z-axis, the branch's y-axis points up toward
+other models consider each branching, whether monopodial or dichotomous,         the sky and its x-axis points parallel to the ground surface, according to the
+to be discrete levels. They often require nine or ten of these levels. While     right-hand rule. The tube of a stem at a recursive level n is divided into a
+this is primarily convention, it will be significant in optimized rendering      number of near-cylindrical segments defined by nCurveRes. Each segment
+(Section 5). Also, branch level control can assist in designing a tree. We       is stored as a nearly-circular cross-section. These cross-sections are later
+usually begin by deactivating the rendering of all levels but the first (the     connected together to draw a triangular mesh. If nCurveBack is zero, the
+trunk). Once the trunk's appearance is acceptable, we activate and design        z-axis of each segment on the stem is rotated away from z-axis of the
+the second level, and so on, ascending degrees of complexity to the third        previous segment by (nCurve/nCurveRes ) degrees about its x-axis. If
+and fourth levels. This allows us to view the general shape and structure        nCurveBack is non-zero, each of the segments in the first half of the stem
+of the tree without the visual confusion and performance loss due to             is rotated ( nCurve/(nCurveRes/2) ) degrees and each in the second half is
+drawing minor branches and leaves. In many cases, foliated trees can be          rotated ( nCurveBack/(nCurveRes/2) ) degrees. This two part curve allows
+drawn reasonably well in a final rendering without displaying any of the         for simple S-shaped stems. In either case, a random rotation of magnitude
+minor branches.                                                                  (nCurveV/nCurveRes ) is also added for each segment. A special mode is
+                                                                                 used when nCurveV is negative. In that case, the stem is formed as a helix.
+     Specific trees appear to form particular shapes [CHND88,CHAN82].            The declination angle is specified by the magnitude of nCurveVary.
+These shapes are usually the result of the lengths of the primary branches
+according to their position on the trunk of the tree, e.g., a conically shaped   4.2 Stem Splits
+tree has larger main branches near the base of the trunk. Alternatively, it
+is sometimes easier to define the general shape of the crown by envisioning      A stem generally extends out to the periphery of the tree, potentially
+an invisible envelope around the tree which inhibits growth of branches.         splitting off cloned stems along its length. A cloned stem is considered at
+In addition, many trees have branches that show a preference to curve            the same recursive level as its twin and inherits all of its properties. The
+towards a vertical direction, either up or down, presumably responding to        frequency of splitting is defined by nSegSplits. This is the number of new
+the competing influences of light and gravity.                                   clones added for each segment along the stem and is usually between 0 and
+                                                                                 1, with 1 referring to a dichotomous split on every segment. A value of 2
+     Cross-sectional variations can be particularly noticeable in the trunk.
+The scale of the cross-section does not necessarily taper linearly as with a
+perfect cone. Some cacti can even have periodic scaling in addition to
+simple random variations. The radial distance about any particular cross-
+section can also vary randomly and/or periodically. In addition, the radius
+of the trunk clearly flares at the base of the many trees.
+
+120
+would indicate a ternary split. There is no pre-determined limit to the                    remaining segments in the reverse direction so that the stem will tend to
+number of splits per segment; but, since each clone can also generate its                  return to its originally intended direction. This compensation prevents
+own clones at the next segment, the resulting number of stems can easily                   overspreading due to large numbers of stem splits. The extent that any
+reach undesirable levels. For instance, with a nCurveRes of 5 and                          level of stems spreads out can be easily controlled using the curve
+nSegSplits of 2, one stem will eventually split off into 81 separate clones:               parameters.
+(nSegSplits+1)nCurveRes-1=34. Note in the top center diagram in Figure 1
+where a tree has 0SegSplits of 1 and 0CurveRes of 3. The resulting                              A stem and its clones are also spread apart by rotating them about an
+splitting results in a trunk with four total stems: (1+1)3-1 = 4. There is an              axis that is parallel to the z-axis of the tree. This parallel axis of rotation
+additional parameter nBaseSplits that specifies the equivalent of nSegSplits               intersects at the point where the split occurred. Note that they are not
+at the end of the first segment of the trunk. This allows for an independent               rotated about the relative z-axis of the stem as this would disturb the proper
+number of splits at the base of the tree, thus permitting trees that seem to               orientation of the relative x and y axes. In the normal case of a single
+have multiple trunks with few further splitting tendencies. Fractional values              clone, the original stem (which is continued after its clone is created) is
+of nSegSplits will cause additional splits to be evenly distributed throughout             rotated about the parallel axis by an angle of magnitude:
+all segments of all stems in that particular level of recursion. For example,
+an nSegSplits of 1.2 will form one clone on 80% of the level n segments                    [ | | ] 20 + 0.75 * (30 +             )    *                2
+and two clones on 20% of the segments. Note that this yields an average                                       declination-90             RANDOM0  to  1
+number of 1.2 splits per segment. Using random numbers simplistically to
+distribute the fractional part of nSegSplits is unacceptable because when, by              The sign of this angle is random as well. This equation diverges two
+chance, several consecutive segments all get the extra split, they can form                nearly-horizontal branches by 20 to 50 degrees about the parallel axis, but
+an unnaturally large number of stems in close proximity on part of the tree.               allows near-vertical branches to spread up to 140 degrees. Excessive
+To evenly distribute the splits, we use a technique similar to Floyd-                      rotation for a near-horizontal branch could cause a very unnatural effect.
+Steinburg Error Diffusion [FLOY76]. For each recursive level, a global
+value holds an "error value" initialized to 0.0. Each time nSegSplits is                   4.3 Stem Children
+used, this error is added to create a SegSplitseffective which is rounded to the
+nearest integer. The difference (SegSplitseffective-nSegSplits) is subtracted              One could theoretically build a tree just from clones, but the variety of trees
+from the error. So, if a value is rounded up, it is more likely that the next              you could produce would be greatly limited. The even distribution that
+value will be rounded down (and vice versa).                                               makes the splits controllable also makes the shape formed from the resulting
+                                                                                           stems and clones very uniform. Also, many trees do not exhibit a clear
+                                0SplitAngle                                                splitting nature and have branches that grow from other branches in a spiral
+                                                                                           or nearly coplanar manner. For this, we can spawn children, which are
+                                                                        1Rotate            considered one recursive level below their parents. Although a child can
+                                                                         +- 1RotateV       have entirely different attributes from its parent, some of these attributes are
+                                                                                           defined relative to its parent's equivalents. Note that the other models
+BaseSplits=2                       0SegSplits=1                 Top View                   generally only allow each tree to be dichotomous, monopodial, or
+0CurveRes=3                        0CurveRes=3                                             somewhere in between. Honda recognized a problem with excessive
+                                                                                           branching and sought to resolve it with branch interactions and unequal
+                   radius0 * (1-0Taper) when 0<=0Taper<=1                                  flow rates [HOND81]. Since our clones and children allow for dichotomous
+                                                                                           and monopodial branching simultaneously, we rarely encounter this
+length0 = (Scale +- ScaleV)                             6   stems2 = 6                     problem. Also, since our parameters can address the character of an entire
+                                                     4                                     stem and not just its segment-to-segment nature, we allow users to make
+                                                                                           changes on a level they can more easily understand and visualize.
+*(0Length +- 0LengthV)                            2         5                              nBranches defines the maximum number of child sub-stems that a
+                                                                                           particular level of stems can create over the length of all of its segments.
+                   length1 RatioPower                   down2 = 2DownAngle +-              The actual number of children from any stem might be less than this
+                   length0                                                                 maximum. The number of successive child stems (really "grandchildren")
+radius1= radius *                                    3                  2DownAngleV        is computed as
+
+                                                  Leaves=2                                      stems = stemsmax * (0.2 + 0.8 * (lengthchild/lengthparent) /lengthchild,max)
+                                                  1
+                                                                                           for the first level of branches, and
+
+                                                                - 1Curve +- 1CurveV             stems = stemsmax * ( 1.0 - 0.5 * offsetchild/lengthparent)
+                                                                       1CurveRes
+                                                                                           for further levels of branches, where offsetchild is the position in meters of
+                   z                     y                                                 the child along the parent's length (from the base). Any stem that has been
+                                                                                           cloned or is, itself, a clone reduces its propensity to form clones by half.
+                                y           1CurveRes=3                                    Given a normalized position "ratio" from 0.0 to 1.0, a function
+                                                                                           ShapeRatio(shape, ratio) uses various pre-defined relations:
+length1 = length0               z
+ * ShapeRatio()
+                             x           x
+
+* (1Length +- 1LengthV)                                         LeafScale*LeafScaleX
+
+                                                                                           Shape              Result
+
+                                                                                           0 (conical)        0.2 + 0.8 * ratio
+
+                                                                                           1 (spherical)      0.2 + 0.8 * sin(  * ratio )
+
+down1 =                                  z  length0 * BaseSize                             2 (hemispherical) 0.2 + 0.8 * sin( 0.5 *  * ratio )
+
+1DownAngle +- 1DownAngleV                                                                  3 (cylindrical)    1.0
+
+                                            y                   LeafScale                  4 (tapered cylindrical) 0.5 + 0.5 * ratio
+
+                                               x                                           5 (flame)          ratio/0.7                                   ratio0.7
+
+                                                                                                              (1.0 - ratio)/0.3                           ratio>0.7
+
+         radius0 = length0 * Ratio * (0Scale +- 0ScaleV)                                   6 (inverse conical) 1.0 - 0.8 * ratio
+
+stems1=3, Levels=3, 0CurveRes=1                                Connecting                  7 (tend flame)     0.5 + 0.5 * ratio/0.7                       ratio0.7
+
+(not all branches and leaves are shown)                        stem not drawn                                 0.5 + 0.5 * (1.0 - ratio)/0.3               ratio>0.7
+
+                      Figure 1: Tree Diagram                                               8 (envelope)       use pruning envelope (see Section 4.6)
+
+     If there are any clones, then the z-axes of the stem and its clones each              Generally, the Shape parameter is used as the index to this table of curves.
+rotate away from the z-axis of the previous segment by                                     These shapes correspond to generic shapes defined in the botanical tree
+                                                                                           texts, previously referenced.
+     anglesplit = (nSplitAngle±nSplitAngleV ) - declination
+                                                                                                The maximum relative length (lengthchild,max) of any recursive level of
+limited to a minimum of 0, where the "declination" angle (defined here as                  stems is nLength±nLengthV which is defined as a fraction of its parent's
+the angle of a stem from the tree's positive z-axis) can be found by taking                specific length. For example, a child with lengthchild,max of 0.3 and a 10
+the inverse cosine of the z component of a unit z vector passed through the                meter long parent could reach a maximum length of about 3 meters. A
+current matrix transformation of the relative coordinate system. The first                 length is computed by
+clone continues the original mesh and cannot rotate around the z-axis or it
+would twist the mesh (i.e., if one rotated one of the circular faces on a                       lengthchild = lengthtrunk * lengthchild,max *
+cylinder about the longitudinal axis, the resulting section of geometry would                        ShapeRatio( (Shape,(lengthtrunk-offsetchild)/(lengthtrunk-lengthbase))
+render as a hourglass shape). This anglesplit is later distributed over the
+                                                                                           for the first level of branches and
+
+                                                                                      121
+     lengthchild = lengthchild,max * ( lengthparent - 0.6 * offsetchild)              and when 0  nTaper < 1
+
+for further levels of branches, where lengthbase is the fractional bare area at            radiusZ = taperZ
+the base of the tree calculated as (BaseSize*scaletree ) and scaletree defined        or when 1  nTaper  3
+as (Scale±ScaleV) in meters . The trunk has no parent, so its length is
+defined by                                                                            Z2 = ( 1 - Z ) * lengthstem             (nTaper < 2) OR ( Z2 < taperZ)
+                                                                                                                              otherwise
+     lengthtrunk = ( 0Length ± 0LengthV )*scaletree                                   depth = 1
+                                                                                      depth = nTAPER - 2
+If nDownAngleV is positive, the z-axis of a child rotates away from the z-
+axis of its parent about the x-axis at an angle of                                    Z3 = Z2                                            nTaper < 2
+(nDownAngle±nDownAngleV). However, if nDownAngleV is negative,
+the variation is distributed along the height of the tree by                          | | Z3 = Z2 - 2 * taperZ * integer( Z2 / (2 * taperZ) + 0.5 ) otherwise
+
+    downanglechild = nDownAngle ± [ nDownAngleV *                                     radiusZ = taperZ                        (nTaper<2) AND ( Z3  taperZ)
+
+               ( 1 - 2 * ShapeRatio( 0, (lengthparent - offsetchild) /                radiusZ = (1-depth) * taperZ +
+
+            (lengthparent - lengthbase) ) ) ]                                                  depth * sqrt( taperZ2 - (Z3 - taperZ)2 )  otherwise
+
+This can be used to linearly change the down angle based on the position              where 'depth' is a scaling factor used for the periodic tapering. This
+of the child along its parent, as with the Black Tupelo's main branches seen          periodic tapering is useful for some cacti, where annual growth can
+in Plate 2b. Note how they are angled upward near the crown of the tree
+and angled downward near the bottom. If nRotate is positive, each child               accumulate in segments [HAUS91]. Similarly, it can be used as a rough
+formed along the parent is placed in a helical distribution by rotating about         approximation of the scales on palm trees.
+the z axis of its parent relative to the previous child by the angle
+(nRotate±nRotateV). In the special case where nRotate is negative, each                    In addition to tapering, the trunk may also vary its radius by other
+child is rotated about its parent's z-axis relative to its parent's y-axis by the     means. Flaring creates an exponential expansion near the base of the trunk.
+angle (180+nRotate±nRotateV) on alternating sides of the parent branch.               At the unit position Z from 0 to 1 along the length of a stem, the following
+This allows for a nearly coplanar child stem distribution. Since the y-axis           flareZ scales the radiusZ computed above.
+of any stem with a small downangle points back toward its parent, the
+planar distribution from such a stem is aligned with that parent. This makes          y=1-8*Z
+it easy to design trees where sub-branches tend to spawn parallel to the              flareZ = Flare * ( 100y - 1 ) / 100 +1
+ground surface. This effect is most obvious in the tree shown in Plate 1v.
+                                                                                      where the value of y is limited to a minimum of zero. Note that this
+     Aono and Kunii go into detail about the proper divergence and                    equation scales the radius by a minimum of 1 and a maximum of about (1
+branching angle [AONO84]. These correspond to our rotation and down                   + Flare).
+angles, respectively. They note the Schimper-Braun law which states that
+this divergence angle is a fraction of 360 degrees based on a Fibonacci                    The trunk can also have an irregular non-circular cross-section. This
+sequence of 1/2, 1/3, 2/5, 3/8, ... , resulting in possible angles of 180, 120,       can be very apparent in the large supporting "knees" of cypress trees
+144, 135, and so on. Our results show that any number near 140 degrees                [REIL91]. These variations are also clearly present on some cacti, which
+works well in most situations. Aono and Kunii also note that the branching            can have pronounced ribs or ridges [HAUS91]. Lobes specifies the number
+angle (our down angle) appears to be smaller for branches that form later             of peaks in the radial distance about the perimeter. Even numbers can
+as the tree matures. De Reffye attributes this to gravity affecting the               cause obvious symmetry, so odd numbers such as 3, 5, and 7 are preferred.
+increased mass of older branches and simulates the effect including elastic           The LobeDepth specifies the magnitude of the variations as a fraction of the
+curvature using Young's modulus [REFF88]. The change in the branching                 radius as follows:
+angle can result in large angles at the base of the tree and smaller angles
+along the height of the tree. We implement this linearly with the negative                 lobeZ = 1.0 + LobeDepth * sin ( Lobes * angle )
+nDownAngleV as noted above. However, Aono and Kunii state that
+changing their model to implement this effect does not add much realism.              given a specific "angle" from the x-axis about the z-axis. Note that a
+We find the effect, as implemented in our model, to be very substantial,              LobeDepth of zero effectively turns lobing off. The lobeZ value
+especially in dormant or sparsely foliated trees.                                     cumulatively scales radiusZ as did flareZ. Finally, a simple scaling factor
+                                                                                      (0Scale±0ScaleV ) can also be applied to the trunk.
+4.4 Stem Radius
+                                                                                           Bloomenthal modeled this flaring and lobing using an "equipotential
+                                                                                      curve surrounding the points of intersection of the tree skeleton with the
+                                                                                      plane of the contour" [BLOO85], essentially the blended circumference of
+                                                                                      several circles moving further away from the center of the trunk near the
+                                                                                      base of the tree.
+
+For all levels except the trunk, the radius at the base of a stem is defined          4.5 Leaves
+as a function of the radius of its parent stem. The trunk's radius is
+proportional to the scale of the entire tree.                                         The recursive proliferation of children is limited by Levels. This specifies
+                                                                                      the maximum level of stems that will be created starting from 0 for the
+radiustrunk = lengthtrunk * Ratio * 0Scale                             trunk          trunk, usually to 3 or 4. If Leaves is non-zero, then leaves are used as the
+radiuschild = radiusparent * ( lengthchild / lengthparent )RatioPower  branches       last level of recursion. The leaves use the nDownAngle, nDownAngleV,
+                                                                                      nRotate, and nRotateV from the that level of recursion. Any leaves or
+The maximum radius of a stem is explicitly limited to the radius of the               stems beyond level 3 will simply use the parameters of level 3. Our most
+parent at the point from which it was spawned. The radius of the stem can             common configuration is to set Levels to 3 and Leaves to a non-zero value
+be tapered along its length. In the simplest form, this can be used to render         which would give you the following levels of recursion: trunk (0), branches
+the stem as a bent cone. However, there are other variations that allow for           (1), sub-branches (2), and leaves (3). Some trees, such as the weeping
+other cases according to the following chart:                                         willow, require sub-sub-branches as well. Leaves specifies the density in
+                                                                                      the same manner as nBranches did for stems. As with stems, the actual
+nTaper                   Effect                                                       density used is also dependent upon other factors such as the length of the
+     0                   Non-tapering cylinder                                        parent branch relative to the maximum length for the parent's level. Given
+     1                   Taper to a point (cone)                                      that the leaves are at the second level of recursion or further, the following
+     2                   Taper to a spherical end                                     density is used:
+     3                   Periodic tapering (concatenated spheres)
+                                                                                           leaves_per_branch = Leaves *
+Any fractional value from 0 to 3 is permitted to allow adjustment for a
+                                                                                                   ShapeRatio( 4 (tapered), offsetchild/lengthparent ) * quality
+desired effect. The periodic tapering can be seen in the cactus of Plate 1(L)
+                                                                                      given a quality factor supplied by the parent program that is usually near 1.
+which has an 0Taper of 2.2. For a normalized position Z from 0 to 1 along             This quality factor is also used to scale the leaves to maintain consistent
+                                                                                      coverage. This distribution of leaves has the natural effect of preferentially
+the length of a stem, the following equations compute radiusZ, the tapered            placing leaves near the outside of the tree. For a negative value of Leaves,
+radius in meters:                                                                     a special mode is used in which the leaves are placed in a fan at the end of
+                                                                                      the parent stem, as with some palm fronds. The angle over which the
+unit_taper = nTaper                           0  nTaper < 1                           leaves fan out is specified by nRotate. Note that when in fan mode,
+unit_taper = 2 - nTaper                       1  nTaper < 2                           nRotate is not needed for its original purpose. A negative value can also
+unit_taper = 0                                2  nTaper < 3
+
+taperZ = radiusstem * ( 1 - unit_taper * Z )  (purely tapered radius)
+
+                                                                                 122
+be applied to nBranches with similar results, but we have not yet modeled       PruneWidthPeak to the top or bottom of the envelope. A power of 2 gives
+any trees requiring this attribute. We realize that these negative flags can    a rounded concave envelope, while a power of 0.5 gives a rounded convex
+become a bit confusing, but they are only used in a few special cases.          envelope. To determine whether a given transformed point (x,y,z) is inside
+Many users will never need them.                                                the envelope, the boolean 'inside' is computed as:
+
+     Leaves can assume many different shapes [CHND88]. We allow for a                r = sqrt ( x2 + y2 + z2 )
+few common geometries of leaves based on LeafShape. This parameter is
+used as an index to a list of pre-defined leaf shapes, such as oval, triangle,       ratio = ( scaletree - z ) / ( scaletree *(1-BaseSize ) )
+3-lobe oak, 3-lobe maple, 5-lobe maple, any 3 leaflets. Each shape can be
+sized and scaled. For optimum coverage versus computational expense, the           [ inside = r / scaletree < PruneWidth *
+oval leaves are most commonly used. The pre-defined leaf geometries are                  ShapeRatio( 8 (envelope), ratio ) ]
+stored with unit width and length. They are scaled as they are used to
+create the tree geometry. The length of the leaves, in meters, is determined    where ShapeRatio( 8, ratio ) is defined as
+
+by [LeafScale / sqrt(quality)]. The width, in meters, is determined by             [ ] ratio / ( 1 - PruneWidthPeak ) PrunePowerHigh
+[LeafScale*LeafScaleX / sqrt(quality)].
+                                                                                when ratio < 1 - PruneWidthPeak, or
+4.6 Pruning
+                                                                                   [ ] ( 1 - ratio ) / ( 1 - PruneWidthPeak ) PrunePowerLow
+Pruning is used to force a tree to fit inside a specific envelope. We
+originally avoided such a feature since we felt that the shape of a tree        when ratio  1 - PruneWidthPeak. ShapeRatio( 8, ratio ) always returns
+should proceed from its underlying structure, not from the use of artificial    0 when ratio is not in the range of 0 to 1. The Shape parameter can use
+boundaries. We now concede that under the influence of certain                  this index of 8 for a custom shape even if pruning is not turned on. This
+environmental conditions or to control an "uncooperative" tree, pruning can     allows the user to define a shape not covered by the predefined shapes. If
+be very useful. Prusinkiewicz demonstrates pruning applied to the L-system      Shape is 8 and pruning is on, the tree will tend to match the customized
+model [PRUS94]. Essentially, growth of branches is blocked by the edge          shape even before pruning takes place. This may cause some strongly
+of the envelope boundary. Since the L-system progressively grows                curved stems to fall short of the envelope's edge.
+connecting nodes, the model can simply hinder growth near a boundary.
+Our model must approach the problem differently. Since our stems often               The effects of pruning can be diminished by using the PruneRatio.
+reach from the trunk to the tree's outer edges simply chopping off the ends     This defines a weighted average between the unpruned original length and
+of the offending branches,will make the tree's appearance suffer. While this    the completely pruned length. A PruneRatio of 1 activates full pruning
+may be the effect from some actual physical pruning, we would rather use        while a PruneRatio of 0.0 effectively turns pruning off. Thus with values
+pruning as a tool to influence the shape of a tree through the underlying       between 0 and 1, partial pruning can be utilized to avoid artificially smooth
+structure. To do this, every stem must adjust its length to fit inside the      boundaries. Plate 7 demonstrates the use of the pruning envelope to control
+envelope. Each stem must "know this new length" before it spawns any            the weeping willow.
+children since each child's length is dependent on its parent's length.
+Generally, the child branches are recursively spawned during the formation      4.7 Wind Sway
+of the parent's segment from which they grow. This is necessary since the
+child must use a geometric transformation relative to the transformation of     We model stem bending as the deflection of an elastic rod with a circular
+that segment. At that point, the ultimate extent of the parent is not known,    cross-section fixed on one end. This rod has a uniformly distributed force
+so there must first be a non-recursive probing pass for each stem to measure    applied to it. The solution of this is a classic problem of mechanics where
+and rescale its length and then a fully-recursive second pass to actually form  applying the Myosotis method yields useful solutions for the deflection
+the geometry and spawn the children. Note that the probing must also that       [HART77]. We then consider this rod as a kind of pendulum [HALL88].
+each of the stem's clones fits. If any stem or clone punctures the boundary,    The entire system is then modeled as the superposition of coupled
+its length can be iteratively reduced and re-probed until it fits.              oscillators whose periods and phase angles differ so that the paths of points
+                                                                                on a stem are very complex Lissajous figures [ALON70]. These results
+     While the model is capable of using any arbitrary envelope such as the     confirm our general observation that light to moderate winds induce trees
+topiary dinosaur in Prusinkiewicz's paper, the general user should be more      to move so that branches sway at various directions and rates of oscillations.
+comfortable with an easily selected simple envelope. Figure 2 shows a           We currently model the oscillatory effects observed for light to moderate
+pruning envelope.                                                               winds only.
+
+                                  scaletree * PruneWidth                             In our model, tree movement is simulated by introducing time-variant
+                                                                                curvature changes to the stem segments. This effect is added to the
+curvature from PrunePowerHigh,   scaletree =(Scale +- ScaleV)                   structural curvature introduced by nCurve and nCurveBack causing
+greater than 1 in this example                                                  rotations between segments about both the x and y axes. With wind speeds
+(concave)                       length0 = scaletree *                           varying from windspeed to (windspeed+ windgust), the sway angles swayx and
+                                  (0Length +- 0LengthV)                         swayy at unit position Z from 0 to 1 of a segment along the length of a stem
+                                                                                are computed at any "time" (in seconds) using:
+
+                                                                                a0 = 4 * lengthstem ( 1 - Z ) / radiusZ                (degrees)
+                                                                                a1 = windspeed / 50 * a0                               (degrees)
+                                                                                a2 = windgust / 50 * a0 + a1/2                         (degrees)
+
+                                                                                bx = sway_offsetx + radiusstem / lengthstem * time/15  (radians)
+                                                                                by = sway_offsety + radiusstem / lengthstem * time/15  (radians)
+
+                                scaletree * (1-BaseSize)                        [ ] swayx = a1 * sin( bx ) + a2 * sin ( 0.7 * bx ) / nCurveRes (degrees)
+                                  * PruneWidthPeak                              [ ] swayy = a1 * sin( by ) + a2 * sin ( 0.7 * by ) / nCurveRes (degrees)
+
+curvature from PrunePowerLow,   scaletree * BaseSize                            The angles sway_offsetx and sway_offsety are randomly selected for each
+less than 1 in this example                                                     stem in the tree. When the wind sway is activated, each tree geometry
+(convex)
+                                                                                description must be reformed for each frame in an animation to adapt to the
+Figure 2: Pruning Diagram
+                                                                                new angles. By using the same random seed, a specific tree will always
+     The envelope covers a pseudo-ellipsoidal shape with a top at scaletree
+and bottom at (BaseSize*scaletree) in meters. The maximum width of the          have the same basic geometry, perturbed only by the wind-activated
+envelope is (PruneWidth*scaletree) in meters. This maximum width occurs
+at a position along the tree's z-axis as specified by PruneWidthPeak. This      curvature variations. The angles swayx and swayy cause rotations between
+                                                                                segments about the x and y axes, respectively.
+peak is defined as the distance from the bottom of the envelope as a
+                                                                                4.8 Vertical Attraction
+fraction of the total height of the envelope. A PruneWidthPeak of 0.5
+                                                                                With even hemispherical illumination (sky shine), tree shoots grow upwards
+would center the peak as with a standard ellipsoid. The curvature of the        because they are negatively geotropic and positively phototropic. An
+                                                                                upward growth tendency is usually a subtle effect and can be implemented
+envelope can also be independently controlled above and below the peak          using the declination and orientation of each segment in each stem. For
+                                                                                sub-branches and beyond, this curving effect is used in addition to the other
+using PrunePowerHigh and PrunePowerLow, respectively. A power of 1              curvature effects. The trunk and main branches do not use these functions
+
+gives a linear envelope from PruneWidth to 0 over the distance from
+
+                                                               123
+since any such effect can be more easily controlled through the previous         with removal or modification of each facet one at a time. There should be
+                                                                                 negligible overhead (CPU and RAM) involved with this reinterpretation of
+curve parameters. The AttractionUp parameter specifies the upward                the specified geometry.
+
+tendency. Zero denotes no effect and negative numbers cause downward                  Since the trees are not arbitrary objects, we can fit a range-degradation
+                                                                                 algorithm to their expected geometry. Each tree geometry is organized into
+drooping as in the Weeping Willow. A magnitude of one results in a               four discrete geometric descriptions: 3 stem levels and the leaves. Any
+                                                                                 stems beyond the third level are grouped with the third level. The deeper
+tendency of each stem to curve just enough so that its last segment points       levels of stems are rarely visible at long ranges and are often obscured by
+                                                                                 the leaves. Oppenheimer recognized that he could use polygonal tubes for
+in a vertical direction. Higher magnitudes cause stems to curve toward the       large-scale details and vectors (lines) for the smaller details [OPPE86]. He
+                                                                                 warns that artifacts can occur if the "cutover" level is not deep enough. He
+vertical much sooner. Very high magnitudes such as 10 may result in              also states that many small branches can be rendered as triangular tubes.
+                                                                                 Our method of rendering makes similar approximations for efficiency.
+snaking oscillations due to over-correction. This is not necessarily an
+                                                                                      To most efficiently use the CPU and memory, our technique does not
+undesirable result since branches on some trees exhibit a distinctly             convert the geometry, it merely re-interprets it. With progressively
+                                                                                 increasing ranges, a tree will re-interpret stem meshes as lines and leaf
+sinusoidal shape characteristic. Once the effects of nCurve are introduced       polygons as points. With longer ranges, some individual stems and leaves
+                                                                                 will disappear altogether. The specific geometry at any range can be
+to a segment, curve_upsegment is computed for each segment as                    rendered properly by altering limits and increments in the loops that draw
+                                                                                 the data. Although we speak of removing items one by one, we do not
+declination = cos-1( transform_zz )                            (radians)         actually mark or delete them. We merely change the loop parameters that
+orientation = cos-1( transform_yz )                            (radians)         scan the stored geometry so that items are skipped. Any number of
+                                                                                 arbitrarily-ranged trees can be drawn in any order. The time and space
+curve_upsegment = AttractionUp * declination *                 (radians)         overhead required to compute and hold these boundary limits is negligible.
+      cos ( orientation ) / nCurveRes                                            A 100,000 facet tree geometry may be rendered at 2 kilometers as about 30
+                                                                                 lines and 1000 points. This allows vast expanses of trees to be drawn very
+where transform_zz is the z component of a unit z vector passed through the      quickly. A viewer can then move close to any of these trees and see them
+current viewing transformation and transform_yz is the z component of a          at their full resolution.
+unit y vector passed through the current viewing transformation. This
+                                                                                      Since the items in each geometric description are ordered in the same
+curve_upsegment is added to the segment's curvature.                             manner as they were created, they generally start from the bottom of the
+                                                                                 tree and work up. The items are not randomly organized; therefore, we
+4.9 Leaf Orientation                                                             cannot simply remove objects one at a time in order from the top or bottom
+                                                                                 of the list. This could cause the top of the tree to be heavily degraded
+Left alone, the modeled leaves will generally assume seemingly random            while the bottom remained unchanged, or vice versa. Instead, we group the
+orientations. However, in reality, leaves are oriented to face upwards and       items of a type of geometry into groups of a small size which we will call
+outwards, presumably to optimize the available direct (sun) and scattered        "masses". The number of elements per mass is determined by an
+(sky) light. We can use the declination and orientation of each leaf to rotate   appropriate "mass_size". We use a mass_size of 16 for all the stems and
+them toward the light. The necessary rotations are computed based on the         4 for the leaves. Curve fitting equations give a value between 0 and
+current viewing transformation and are applied prior to creating the leaf into   mass_size. To explain, we will use the general term "primitive" to refer
+the geometric description. The effect, fractionally controlled by "bend", is     non-specifically to polygons, lines, or points and the general term "item" to
+applied by obtaining the leaf's position (leafx, leafy, leafz) and normal        refer non-specifically to leaves, trunk, branches, or sub-branches. The total
+(leafnx, leafny, leafnz) in tree coordinates from the current transform matrix,  number of elements in the geometric description of any item is given as
+then computing the current and desired angles:                                   "total_numberitem". Of this, we wish to draw a certain fraction of these
+                                                                                 items using a specific primitive. The portion to be drawn is specified by
+     thetaposition = atan2 ( leafy, leafx )                                      the non-integer "numberprimitive,item", which is between 0 and
+     thetabend = thetaposition - atan2 ( leafny, leafnx )                        mass_sizeprimitive,item. For example, a mass_sizelines,1 of 16 divides up main
+                                                                                 branch lines into masses of 16. A numberlines,1 of 5 says that for every 16
+then computing the change:                                                       cross-sections of recursion level 1, there should be lines connecting the first
+                                                                                 five. Fractional numbers will draw an additional item for a percentage of
+     rotatez ( bend * thetabend )                                                the masses. If there were 160 main-branch cross-sections (10 masses) and
+                                                                                 numberlines,1 of 5.3, then the first 3 masses would show 6 of 16 lines and the
+then recomputing declination, orientation, and normal vector using new           last 7 masses would show 5 of 16 lines. A loop to draw the reduced
+transform:                                                                       portion of the item using a specific primitive would be:
+
+     phibend = atan2 ( sqrt( leafnx2 + leafny2 ), leafnz )                            int_numberprimitive,item= integer( numberprimitive,item )
+     rotatez ( -orientation )                                                         massesprimitive,item = total_numberitem / mass_sizeprimitive,item
+     rotatex ( bend * phibend )                                                       changeprimitive,item = massesprimitive,item *
+     rotatez ( orientation )
+                                                                                                            ( numberprimitive,item - int_numberprimitive,item )
+Plate 6 shows the bending effect applied to a Sassafras tree. The modified            for mass = 0 to massesprimitive,item
+leaf orientations greatly increase the diffusive reflections from the tree. The
+increased variations improve the overall appearance.                                       {
+                                                                                           start = mass * mass_sizeprimitive,item
+5 DEGRADATION AT RANGE                                                                     end = start + int_numberprimitive,item
+
+A tree generated with our algorithm may have on the order of 5000 to                       if mass < changeprimitive,item
+100,000 facets. The detail can be increased automatically for even higher                       end = end + 1
+resolution images, such as the Weeping Willow in Plate 3 boosted to over
+1 million facets. Currently, a high-end graphics workstation may be capable                for index = start to end
+of only about 50,000 facets in real time. The high resolution of the trees                      drawprimitive,item( index )
+is necessary to have an accurate representation at close ranges of 10 to 50
+meters or in equivalent magnified views of greater ranges, as in narrow                    }
+fields-of-view. However, at long ranges, such as 1000 meters, a much
+lower resolution tree could be rendered faster with little or no loss in         To compute the necessary numberprimitive,item, we need to first convert the
+apparent quality.                                                                range to a calibrated scale. This adjusts for the current image size and
+                                                                                 vertical field of view. A modified range value, r2, is computed as:
+     At first thought, it may seem useful to form multiple geometric
+descriptions of the same tree at different "levels of detail". At longer              r2 = range * 1000 / heightimage * Field_Of_Viewy / 60
+ranges, progressively lower resolution geometric descriptions would be used.
+This approach has two problems. First, each instance of a tree consumes          This compensates for the effect of a telephoto lens that causes a tree to
+resources. An average tree's geometric description may use about 1Mb of          appear to be much closer.
+RAM. Also, it may require 1 to 10 seconds to form the data. These
+numbers become much more significant when multiplied by, perhaps, 100                 The following equations outline how numberprimitive,item is computed for
+instances. While this could be managed, a more critical second problem           different levels at different ranges. First, we use the general quality factor
+arises with the quantization of the resolution. In a still picture, the changes  supplied by the parent program (usually between 0 and 1) to determine
+between resolutions would not be very apparent since the variably resolved       some general scaling factors:
+trees appear as different trees. However, in a dynamic simulation, specific
+trees would switch from one resolution to the next. This would result in
+wide "resolution waves" flowing through forest canopies. This is
+unacceptable for realistic simulation.
+
+     A method is needed that uses a single geometric description and renders
+it at an optimal resolution for any range. The changes between the
+differently resolved geometries must be very fine, preferably corresponding
+
+                                                                            124
+s = quality / 2          tree is evergreen, or in summer and fall                       inadequate for our needs. We create our own feature maps from any
+s = quality              otherwise                                                      available information such as scenario data (meteorological, topographical,
+                                                                                        vegetative type and placement, etc.), satellite imagery, and photographs,
+d = 100                  in spring                                                      both aerial and at ground level. We describe vegetation using a 16-bit
+d = 200                  otherwise                                                      raster feature map where 14 bits specify 14 trees or related objects (not
+                                                                                        mutually-exclusive), and 2 bits specify 3 types of grass (mutually-
+Then, we compute the polygons, lines, and points needed for each display                exclusive). Any of the 14 trees (from a larger list) and 3 grass types can
+item as follows.                                                                        be selected differently for any specific scene. For any one of the 14
+                                                                                        selected trees, any number of variations can be specified. These variations
+Level 0 Stems (trunk)                                                                   use the same parameter file, but are generated from a different random seed.
+                                                                                        During rendering, these variations of a tree type are spread randomly over
+            r2 <100      don't draw trunk lines (can appear as seam)                    positions where the appropriate bit for that tree is set in the vegetation
+100 < r2                 draw all trunk lines                                           feature map. This can prevent large forests of similar tree types from
+                                                                                        appearing too uniform and self-similar. Other feature maps are used for
+300 <        r2 < 300    numberpolygons,0 = mass_sizepolygons,0                         soils, rocks, waterways, and roadways. Currently, we generally resolve
+800 <                                                                                   elevation and features maps at 1 or 2 meters per sample. The grass
+             r2 < 800    numberpolygons,0 = mass_sizepolygons,0 * [1.5 - r2/600]        resembles that of Reeves and Blau's particle grass [REEV85]. In our case,
+             r2                                                                         the grass is drawn as curved lines composed of Gouraud-shaded segments.
+                         don't draw trunk polygons at all
+                                                                                             Shadowing within the trees is produced using a standard shadow map
+Level 1 Stems (main branches)                                                           technique [FOLE92]. The shadow map can be used to mark which
+                                                                                        geometric components (polygons, lines, points) will be shadowed before
+200s <       r2 < 200s   numberpolygons,1 = mass_sizepolygons,1 * [1.5 - r2/600]        rendering takes place. This technique is only valid if each rendered instance
+2000s <      r2 < 2000s                                                                 of each specific geometric description has the same rotational orientation
+             r2                                (bounded 0 to mass_sizepolygons,1)       about its z-axis. Otherwise, the shadows would be rotated with the tree.
+                         numberlines,1 = mass_sizelines,1                               This restriction is usually acceptable since each tree selected can have
+                         don't draw polys                                               multiple variations, each of which can be randomly scaled for each instance.
+
+                         numberlines,1 = mass_sizelines,1 *                                  Plate 3 shows various images of a visual simulation from different
+                                                                                        points of view. Plate 3f was made from an altered scenario with higher tree
+                                       [ ] 2.2 - 1.2 (r2/200s)0.3                       density. A moderate haze was applied to the image in Plate 3b.
+
+                         draw nothing for main branches
+
+Level 2 Stems (other branches)
+
+50s <        r2 < 50s    numberpolygons,2 = mass_sizepolygons,2                         7 CONCLUSION
+100s <       r2 < 100s   numberlines,2 = mass_sizelines,2
+500s <       r2 < 500s                                                                  We have introduced a model based on geometrical observables to create and
+             r2          [ ] numberpolygons,2 = mass_sizepolygons,2 * 2 - r2/50s        render three-dimensional trees for simulating natural scenery. A wide
+                                                                                        variety of complex realistic tree structures can be generated quickly using
+                         numberlines,2 = mass_sizelines,2                               a small number of parameters. The resulting images appear quite similar
+                         don't draw polys                                               to images of real botanical trees. We have demonstrated the efficient use
+                                                                                        of the model with our synthetic scene generator.
+                         [ ] numberlines,2 = mass_sizelines,2 * 2 - (r2/100s)0.5
+                                                                                             We explained a range degradation methodology to smoothly degrade the
+                         draw nothing for secondary branches                            tree geometry at long ranges. This is used to optimize the drawing of large
+                                                                                        quantities of trees in forested areas.
+Leaves
+                                                                                             Our attention in designing the model was focused on allowing a general
+             r2 < d/4    numberpolygons,3 = mass_sizepolys,3                            user to create trees that generally match images from books or photographs.
+                                                                                        The user needs no knowledge of botany or complex mathematical
+                         numberpoints,3 = mass_sizepoints,3                             principles, only a basic understanding of geometry. We concentrated on the
+                                                                                        general structural appearance of a tree instead of the biological and
+d/4          r2 < d      numberpolygons,3 = mass_sizepolys,3 *                          biophysical principles that produced its structure.
+
+                                       [ 4/3 - r2 / (3d/4) ]                                 Currently, the rendering of our trees at close range is not quite fast
+                                                                                        enough to meet the needs of real time simulation. A high end graphics
+                         numberpoints,3 = mass_sizepoints,3                             workstation may only be able to draw one very close tree or a few dozen
+                                                                                        long range trees in real time. However, newer hardware will inevitably
+d<           r2          numberpolygons,3 = 0                                           bring higher performance. In the near future, tree models such as this will
+                                                                                        be important in many areas of computer graphics.
+                         [ ] numberpoints,3 = mass_sizepoints,3 * 1.5 - r2 / 2d
+
+                                       (minimum of 1)
+
+The effects of these equations can be seen in Table 2 which summarizes the
+total number of triangles, lines, and points. Triangles refer to elements of
+the triangular meshes which comprise the polygons.
+
+Item             5m 30m 60m 120m 240m 600m 1200m
+
+Level 0 Triangles 1440 1440 1440 1440 1440 760 0
+
+Level 0 Lines 0          0          0  36 36 36 36
+
+Level 1 Triangles 960 960 960 0                0                00                      ACKNOWLEDGEMENTS
+
+Level 1 Lines 240 240 240 223 153 35 0
+
+Level 2 Triangles 17736 14580 0        0       0                00                      All images were created with the CREATION software developed by
+                                                                                        Teletronics and the Modeling Simulation Branch of the US Army Research
+Level 2 Lines 5912 5912 5363 2648 0                             00                      Laboratory.
+
+Leaf Triangles 53248 53248 49800 28200 0                        00                           Thanks to the US Army Research Lab who supported this project and
+                                                                                        helped with this paper, specifically Teresa Kipp, John Ho (retired),
+Leaf Points      13312 13312 13312 13312 11944 1664 1664                                Gertrude Kornfeld (retired), Hung Nguyen, E. "Glenn" Dockery, Michael
+                                                                                        Lander, Janice Colby, and Giap Huynh, and also Dickson Fang and Scott
+Table 2: Number of elements drawn at specific ranges                                    Hawley of Teletronics. Thanks also to Dynamics Research Corporation.
+                 in summer on Quaking Aspen
+
+     Plate 4 shows the Quaking Aspen rendered at the ranges listed in Table             REFERENCES
+2, excluding 5 meters, progressively zoomed by powers of two.
+
+6 APPLICATION                                                                           [ALON70]  M. Alonso, E. Finn. Physics. Addison-Wesley, Reading,
+                                                                                        [AONO84]  Massachusetts, 1970, pp. 160-166.
+Our project involves the development of software to produce accurate and                [BLOO85]  M. Aono, T. Kunii. Botanical Tree Image Generation. IEEE
+realistic high resolution imagery in both the visible and infrared spectrums.                     Computer Graphics and Applications. May, 1984, pp.10-34,
+The emphasis is on positioning vehicles in the context of natural                       [CHND88]  Volume 4, No.5.
+environments for studies of detection and recognition by both humans and                          J. Bloomenthal. Modeling the Mighty Maple. Proceedings
+machines. The backgrounds and vehicles must be of equally high fidelity                           of SIGGRAPH '85 (San Francisco, California, July 22-26,
+to alleviate any bias in the testing.                                                             1985). In Computer Graphics Proceedings, Annual
+                                                                                                  Conference Series, 1985, ACM SIGGRAPH, pp. 305-311.
+     The software utilizes readily available elevation maps and creates                           P. Chandler, A. Cook, G. DeWolf, G Jones, K Widin.
+synthetically-generated shading variations for numerous natural effects.                          Taylor's Guide to Trees. Houghton Mifflin Company, Boston,
+Readily available feature maps are usually at a poor resolution and often                         1988.
+only describe trees as deciduous, coniferous, neither, or both. This is
+
+                                                                                   125
+[CHAN82]     F. Chan, F. Ching, W Collins, M. Evans, W. Flemer, J. Ford,  [PAGE93]      J. Page. Planet Earth: Forest. Time-Life Books, Alexandria,
+             F. Galle, R Harris, R. Korbobo, F. Lang, F. Mackaness, B.    [PRUS90]      Virginia, 1983.
+[COLL74]     Mulligan, R. Ticknor. Trees. The American Horticultural      [PRUS94]      P. Prusinkiewicz, A. Lindenmayer. The Algorithmic Beauty
+[FOLE92]     Society, Mount Vernon, Virginia, 1982.                       [REEV85]      of Plants. Springer-Verlag, New York, 1990.
+[FLOY76]     G. Collingwood, W. Brush. Knowing Your Trees. The                          P. Prusinkiewicz, M. James, R. Mech. Synthetic Topiary.
+[HALL88]     American Forestry Association, Washington, DC., 1974.        [REFF88]      Proceedings of SIGGRAPH '94 (Orlando, Florida, July 24-29,
+[HAUS91]     J. Foley, A. vanDam, S. Feiner, J. Hughes. Computer                        1994). In Computer Graphics Proceedings, Annual
+[HART77]     Graphics, Principles and Practice, Second Edition. Addison-  [REIL91]      Conference Series, 1994, ACM SIGGRAPH, pp. 351-358.
+[HOND71]     Wesley, Reading, Massachusetts, 1992.                        [ROHL94]      W. Reeves. Approximate and Probabilistic Algorithms for
+             R. Floyd, L. Steinburg. An Adaptive Algorithm for Spatial                  Shading and Rendering Structured Particle Systems.
+[HOND81]     Grey Scale, Proceedings SID. 1976, pp. 75-77.                [SYMO58]      Proceedings of SIGGRAPH '85 (San Francisco, California,
+             D. Halliday, R, Resnick. Fundamentals of Physics, 3rd Ed.    [TOOT84]      July 22-26, 1985). In Computer Graphics Proceedings,
+[LIND68]     J. Wiley & Sons, New York, 1988, pp. 306-322.                              Annual Conference Series, 1985, ACM SIGGRAPH, pp. 313-
+[OPPE86]     E. Haustein. The Cactus Handbook. Hamlin, London, 1991.                    322.
+             J. Den Hartog. Strength of Materials. Dover, Mineola, 1977,                P. de Reffye, C. Edelin, J. Françon, M. Jaeger, C. Puech.
+             pp. 79-88.                                                                 Plant models faithful to botanical structure and development.
+             H. Honda. Description of the Form of Trees by the                          Proceedings of SIGGRAPH 88 (Atlanta, Georgia, August 1-5,
+             Parameters of the Tree-like Body: Effects of the Branching                 1988). In Computer Graphics Proceedings, Annual
+             Angle and the Branch Length on the Shape of the Tree-like                  Conference Series, 1988, ACM SIGGRAPH, pp. 151-158.
+             Body. Journal of Theoretical Biology. 1971, pp. 331-338.                   A. Reilly. The Secrets of Trees. Gallery Books, New York,
+             H. Honda, P. Tomlinson, J. Fisher. Computer Simulation of                  1991.
+             Branch Interaction and Regulation by Unequal Flow Rates in                 J. Rohlf, J. Helman.. IRIS Performer: A High Performance
+             Botanical Trees. American Journal of Botany. 1981, pp.                     Multiprocessing Toolkit for Real-Time 3D Graphics.
+             569-585.                                                                   Proceedings of SIGGRAPH '94 (Orlando, Florida, July 24-29,
+             A. Lindenmayer. Mathematical Models for Cellular                           1994). In Computer Graphics Proceedings, Annual
+             Interactions in Development, I&II. Journal of Theoretical                  Conference Series, 1994, ACM SIGGRAPH, pp. 381-394,
+             Biology. 1968, pp. 280-315.                                                specifically Figures 14 and 17 on page 394.
+             P. Oppenheimer. Real Time Design and Animation of Fractal                  G. Symonds. The Tree Identification Book. William Morrow
+             Plants and Trees. Proceedings of SIGGRAPH '86 (Dallas,                     & Company, New York, 1958.
+             Texas, August 18-22, 1986). In Computer Graphics                           E. Tootill, S. Blackmore. The Facts on File Dictionary of
+             Proceedings, Annual Conference Series, 1986, ACM                           Botany. Market House Books LTD, Aylesbury, UK, 1984,
+             SIGGRAPH, pp. 55-64.                                                       p.155.
+
+APPENDIX: Parameter List
+
+Parameter                            Description                              Quaking Aspen Black Tupelo   Weeping Willow  CA Black Oak
+Shape                                general tree shape id                                                 3               2
+BaseSize                             fractional branchless area at tree base  7              4             0.05            0.05
+Scale,ScaleV,ZScale,ZScaleV          size and scaling of tree                                              15, 5, 1, 0     10, 10, 1, 0
+Levels                               levels of recursion                      0.4            0.2           4               3
+Ratio,RatioPower                     radius/length ratio, reduction                                        0.03, 2         0.018, 1.3
+Lobes,LobeDepth                      sinusoidal cross-section variation       13, 3, 1, 0 23, 5, 1, 0      9, 0.03         5, 0.1
+Flare                                exponential expansion at base of tree                                 0.75            1.2
+                                                                              3              4
+
+                                                                              0.015, 1.2     0.015, 1.3
+
+                                                                              5, 0.07        3, 0.1
+
+                                                                              0.6            1
+
+0Scale,0ScaleV                       extra trunk scaling                      1, 0           1, 0          1, 0            1, 0
+                                                                              1, 0, 1        1, 0, 1.1     0.8, 0, 1       1, 0, 0.95
+0Length,0LengthV, 0Taper             fractional trunk, cross-section scaling  0              0             2               2
+                                                                              0, 0, 0        0, 0, 0       0.1, 3, 0       0.4, 10, 0
+0BaseSplits                          stem splits at base of trunk             3, 0, 0, 20    10, 0, 0, 40  8, 0, 20, 120   8, 0, 0, 90
+
+0SegSplits,0SplitAngle,0SplitAngleV  stems splits & angle per segment
+
+0CurveRes,0Curve,0CurveBack,0CurveV curvature resolution and angles
+
+1DownAngle,1DownAngleV               main branch: angle from trunk            60, -50        60, -40       20, 10          30, -30
+                                                                              140, 0, 50     140, 0, 50    -120, 30, 25    80, 0, 40
+1Rotate,1RotateV,1Branches           spiraling angle, # of branches           0.3, 0, 1      0.3, 0.05, 1  0.5, 0.1, 1     0.8, 0.1, 1
+                                                                              0, 0, 0        0, 0, 0       0.2, 30, 10     0.2, 10, 10
+1Length,1LengthV,1Taper              relative length, cross-section scaling   5, -40, 0, 50  10, 0, 0, 90  16, 40, 80, 90  10, 40, -70, 150
+
+1SegSplits,1SplitAngle,1SplitAngleV  stem splits per segment
+
+1CurveRes,1Curve,1CurveBack,1CurveV curvature resolution and angles
+
+2DownAngle,2DownAngleV               secondary branch: angle from parent      45, 10         30, 10        30, 10          45, 10
+2Rotate,2RotateV,2Branches           spiraling angle, # of branches           140, 0, 30                                   140, 0, 120
+2Length,2LengthV, 2Taper             relative length, cross-section scaling   0.6, 0, 1      140, 0, 25    -120, 30, 10    0.2, 0.05, 1
+2SegSplits,2SplitAngle,2SplitAngleV  stem splits per segment                  0, 0, 0                                      0.1, 10, 10
+2CurveRes,Curve,2CurveBack,2CurveV   curvature resolution and angles          3, -40, 0, 75  0.6, 0.1, 1   1.5, 0, 1       3, 0, 0, -30
+
+                                                                                             0, 0, 0       0.2, 45, 20
+
+                                                                                             10, -10, 0, 150 12, 0, 0, 0
+
+3DownAngle,3DownAangleV              tertiary branch: angle from parent       45, 10         45, 10        20, 10          45, 10
+                                                                              77, 0, 10      140, 0, 12    140, 0, 300     140, 0, 0
+3Rotate,3RotateV,3Branches           spiraling angle, # of branches           0, 0, 1        0.4, 0, 1     0.1, 0, 1       0.4, 0, 1
+                                                                              0, 0, 0        0, 0, 0       0, 0, 0         0, 0, 0
+3Length,3LengthV, 3Taper             relative length, cross-section scaling   1, 0, 0, 0     1, 0, 0, 0    1, 0, 0, 0      1, 0, 0, 0
+
+3SegSplits,3SplitAngle,3SplitAngleV  stem splits per segment
+
+3CurveRes,3Curve,3CurveBack,3CurveV curvature resolution and angles
+
+Leaves,LeafShape                     number of leaves per parent, shape id    25, 0          6, 0          15, 0           25, 0
+LeafScale,LeafScaleX                 leaf length, relative x scale            0.17, 1        0.3, 0.5      0.12, 0.2       0.12, 0.66
+AttractionUp                         upward growth tendency                   0.5            0.5,          -3              0.8
+PruneRatio                           fractional effect of pruning             0              0             1               0
+PruneWidth,PruneWidthPeak            width, position of envelope peak         0.5, 0.5       0.5, 0.5      0.4, 0.6        0.5, 0.5
+PrunePowerLow,PrunePowerHigh         curvature of envelope                    0.5, 0.5       0.5, 0.5      0.001, 0.5      0.5, 0.5
+
+                                                                     126
+                                                   COMPUTERGRAPHICSProceedinas,~ An0ual Conference Series, 1995
+
+                                                                  Plate 2: Black Tupelo,
+                                                                           (a) with leaves (b) without leaves
+
+Plate 1: (a,b) Black Oak,  (c,d) Sassafras,
+
+(e,f) Swamp Oak,           (g) Cottonwood,    (h) Tamarack,
+
+(i,j) Lombardy Poplar, (k) Queen Palm,        (1) cactus,
+                                              (p) Austrian Pine,
+(m,n) Rock Elm,            (o) Black Spruce,  (t) White Cedar,
+                                              (x) Longleaf Pine
+(q,r) Quaking Aspen, (s) Balsam Fir,
+
+(u) Bamboo, (v) generic, (w) Jack Pine,
+
+                                              127                                                              127
+SIGGRAPH 95, Los ~ . C . a l ~ u s t    6~11, t995
+
+                                                                     Plate 4: Range Degradation
+
+i~i!!~i~!~:i!:~i~i!~~~i~i,~ ~.....
+
+                 i!~'iii,i ~~i'~~"~i~~
+
+Plate 3: Scene from (a) Northeast, (b) Northwest, (c,d) South, (e) Overhead; and (if)with Modifications Plate 5: Weeping Willow
+
+Plate 6: Sassafras with leaves (a) unmodified, (b) re-oriented       Plate 7: Weeping Willow: (a) unpruned, (b) pruned
+
+                                                                128
+

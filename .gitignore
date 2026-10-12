@@ -1,3 +1,7 @@
 /target
-/Base Assets
 *.png.tmp
+/non-essential/Base Assets
+/non-essential/backups
+/non-essential/research/neon
+/non-essential/research/gliht
+/non-essential/research/satellite

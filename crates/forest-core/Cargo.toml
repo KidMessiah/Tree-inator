@@ -8,10 +8,12 @@ rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 png = "0.18"
+image = { workspace = true, features = ["webp", "jpeg"] }
 miniz_oxide = "0.8"
 wgpu = { version = "30", optional = true }
 bytemuck = { version = "1", features = ["derive"], optional = true }
 pollster = { version = "0.4", optional = true }
+i_overlay = "9.0.1"
 
 [features]
 default = ["gpu"]

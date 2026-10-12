@@ -19,6 +19,8 @@ pub struct Extra {
     pub kind: Kind,
     /// Shrinks the crown inside its sprite, to leave room for roots or other parts around it.
     pub crown_scale: f64,
+    /// Draws the branches as the darkest foliage instead of wood, for dense needled crowns.
+    pub hide_wood: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -90,7 +92,8 @@ fn load(text: &str) -> Vec<Extra> {
             _ => Kind::Tree,
         };
         let crown_scale = v.get("crown_scale").and_then(|x| x.as_f64()).unwrap_or(1.0).max(0.2);
-        out.push(Extra { name, preset, canopy, roots, kind, crown_scale });
+        let hide_wood = v.get("hide_wood").and_then(|x| x.as_bool()).unwrap_or(false);
+        out.push(Extra { name, preset, canopy, roots, kind, crown_scale, hide_wood });
     }
     out
 }
@@ -140,47 +143,54 @@ pub fn direct(e: &Extra, seed: u64) -> Option<Direct> {
         Kind::Stump => {
             let mut geo = empty_geo(&e.preset, &e.canopy);
             let mut tones = Vec::new();
-            // rings of wood, then the bark round the edge; the rings vary a little in width
+            // a cut face with a few faint rings, a lumpy bark rim, and short stubs of root at the foot
             let r_out = 0.5 + rng.sym() * 0.04;
             let (ox, oy) = (rng.sym() * 0.03, rng.sym() * 0.03);
-            let mut rho = 0.02;
+            let lump = rng.in_range(0.0, std::f64::consts::TAU);
+            let mut rho = 0.03;
             let mut k = 0;
-            while rho < r_out - 0.04 {
-                let w = 0.012 + 0.02 * rng.random();
-                let mut pts = Vec::new();
+            while rho < r_out - 0.07 {
+                let w = 0.03 + 0.03 * rng.random();
+                let n = ((rho * 120.0) as usize).max(12);
                 let wob = rng.in_range(0.0, std::f64::consts::TAU);
-                let n = ((rho * 140.0) as usize).max(10);
-                for j in 0..=n {
+                let pts = (0..=n).map(|j| {
                     let a = j as f64 / n as f64 * std::f64::consts::TAU;
-                    let rr = rho * (1.0 + 0.05 * (3.0 * a + wob).sin());
-                    pts.push(bp(V(ox + a.cos() * rr, oy + a.sin() * rr, 0.06), w));
-                }
-                geo.splines.push((1, pts));
-                tones.push(if k % 2 == 0 { 0.78 } else { 0.58 });
-                rho += w * 1.1;
-                k += 1;
-            }
-            // bark ring
-            let mut pts = Vec::new();
-            for j in 0..=60 {
-                let a = j as f64 / 60.0 * std::f64::consts::TAU;
-                let rr = r_out * (1.0 + 0.04 * (4.0 * a).sin() + 0.02 * (7.0 * a + 1.0).sin());
-                pts.push(bp(V(ox + a.cos() * rr, oy + a.sin() * rr, 0.05), 0.05));
-            }
-            geo.splines.push((1, pts));
-            tones.push(0.18);
-            // a few roots running out from the base
-            for _ in 0..rng.in_range(3.0, 6.0) as usize {
-                let a = rng.in_range(0.0, std::f64::consts::TAU);
-                let l = rng.in_range(0.2, 0.5);
-                let pts = (0..4).map(|j| {
-                    let u = j as f64 / 3.0;
-                    bp(V(a.cos() * (r_out * 0.9 + l * u), a.sin() * (r_out * 0.9 + l * u), 0.03), 0.06 * (1.0 - 0.7 * u))
+                    let rr = rho * (1.0 + 0.04 * (2.0 * a + wob).sin() + 0.03 * (5.0 * a + lump).sin());
+                    bp(V(ox + a.cos() * rr, oy + a.sin() * rr, 0.06), w)
                 });
                 geo.splines.push((1, pts.collect()));
-                tones.push(0.22);
+                tones.push(if k % 3 == 0 { 0.6 } else { 0.68 });
+                rho += w * 0.95;
+                k += 1;
             }
-            Some(Direct { geo, tones, noise: 0.04, view: (0.0, 0.0, 1.0, 0.1) })
+            let rim = |r: f64, w: f64, z: f64| -> Vec<BP> {
+                (0..=64).map(|j| {
+                    let a = j as f64 / 64.0 * std::f64::consts::TAU;
+                    let rr = r * (1.0 + 0.05 * (3.0 * a + lump).sin() + 0.03 * (8.0 * a + 1.0).sin());
+                    bp(V(ox + a.cos() * rr, oy + a.sin() * rr, z), w)
+                }).collect()
+            };
+            geo.splines.push((1, rim(r_out - 0.03, 0.07, 0.05)));
+            tones.push(0.22);
+            // one crack running in from the rim
+            let ca = rng.in_range(0.0, std::f64::consts::TAU);
+            let crack: Vec<BP> = (0..5).map(|j| {
+                let u = j as f64 / 4.0;
+                bp(V(ox + ca.cos() * r_out * (0.95 - 0.7 * u), oy + ca.sin() * r_out * (0.95 - 0.7 * u), 0.065), 0.012)
+            }).collect();
+            geo.splines.push((1, crack));
+            tones.push(0.3);
+            for _ in 0..rng.in_range(3.0, 5.0) as usize {
+                let a = rng.in_range(0.0, std::f64::consts::TAU);
+                let l = rng.in_range(0.08, 0.16);
+                let pts = (0..4).map(|j| {
+                    let u = j as f64 / 3.0;
+                    bp(V(a.cos() * (r_out * 0.92 + l * u), a.sin() * (r_out * 0.92 + l * u), 0.03), 0.09 * (1.0 - 0.6 * u))
+                });
+                geo.splines.push((1, pts.collect()));
+                tones.push(0.24);
+            }
+            Some(Direct { geo, tones, noise: 0.03, view: (0.0, 0.0, 1.0, 0.1) })
         }
         Kind::Log => {
             let mut geo = empty_geo(&e.preset, &e.canopy);
@@ -188,41 +198,41 @@ pub fn direct(e: &Extra, seed: u64) -> Option<Direct> {
             let ang = rng.in_range(0.0, std::f64::consts::TAU);
             let (dx, dy) = (ang.cos(), ang.sin());
             let (nx, ny) = (-dy, dx);
-            let len = 1.7 + rng.sym() * 0.15;
-            let bend = rng.sym() * 0.18;
-            let r_root = 0.2 + rng.random() * 0.04;
+            // long and thin, nearly straight, barely tapered
+            let len = 1.85 + rng.sym() * 0.1;
+            let bend = rng.sym() * 0.06;
+            let r_root = 0.04 + rng.random() * 0.02;
             let at = |u: f64| -> V {
                 let s = (u - 0.5) * len;
                 let side = bend * 4.0 * u * (1.0 - u);
-                V(dx * s + nx * side, dy * s + ny * side, 0.08)
+                V(dx * s + nx * side, dy * s + ny * side, 0.07)
             };
-            let pts: Vec<BP> = (0..=8)
+            let pts: Vec<BP> = (0..=24)
                 .map(|j| {
-                    let u = j as f64 / 8.0;
-                    // thick at the root end, thinner toward the top, with a little flare at the foot
-                    let flare = if u < 0.12 { 1.0 + (0.12 - u) * 4.0 } else { 1.0 };
-                    bp(at(u), r_root * (1.0 - 0.38 * u) * flare)
+                    let u = j as f64 / 24.0;
+                    let flare = if u < 0.05 { 1.0 + (0.05 - u) * 6.0 } else { 1.0 };
+                    bp(at(u), r_root * (1.0 - 0.18 * u) * flare)
                 })
                 .collect();
             geo.splines.push((0, pts));
-            tones.push(0.4);
-            // the stubs of branches along it, and a couple of broken limbs
-            let n = rng.in_range(3.0, 6.0) as usize;
+            tones.push(0.72);
+            // a few short broken branch stubs, thin and pale
+            let n = rng.in_range(2.0, 5.0) as usize;
             for _ in 0..n {
-                let u = rng.in_range(0.15, 0.95);
+                let u = rng.in_range(0.1, 0.9);
                 let side = if rng.random() < 0.5 { 1.0 } else { -1.0 };
                 let base = at(u);
-                let a = ang + side * rng.in_range(0.6, 1.3);
-                let l = rng.in_range(0.08, 0.3);
-                let rad = r_root * (1.0 - 0.38 * u) * rng.in_range(0.22, 0.4);
+                let a = ang + side * rng.in_range(0.7, 1.2);
+                let l = rng.in_range(0.06, 0.22);
+                let rad = r_root * rng.in_range(0.25, 0.4);
                 let pts: Vec<BP> = (0..3).map(|j| {
                     let t = j as f64 / 2.0;
-                    bp(base + V(a.cos() * l * t, a.sin() * l * t, 0.04 - 0.02 * t), rad * (1.0 - 0.4 * t))
+                    bp(base + V(a.cos() * l * t, a.sin() * l * t, 0.03), rad * (1.0 - 0.4 * t))
                 }).collect();
                 geo.splines.push((1, pts));
-                tones.push(0.36);
+                tones.push(0.7);
             }
-            Some(Direct { geo, tones, noise: 0.12, view: (0.0, 0.0, 1.0, 0.1) })
+            Some(Direct { geo, tones, noise: 0.05, view: (0.0, 0.0, 1.0, 0.1) })
         }
     }
 }

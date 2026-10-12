@@ -23,7 +23,7 @@ fn main() {
     let a: Vec<String> = std::env::args().collect();
     let (out, name) = (&a[1], &a[2]);
     let r0 = 60.0f32;
-    let mut rows: Vec<Vec<forest_core::wp::Sprite>> = Vec::new();
+    let mut rows: Vec<Vec<forest_core::sprite::Sprite>> = Vec::new();
     for spec in &a[3..] {
         let c = parse(name, spec);
         let t = std::time::Instant::now();
@@ -85,7 +85,7 @@ fn main() {
 
 /// Gaps: empty pixels inside the crown outline (the filled shape after closing small holes). Wood: bark share
 /// of what is drawn.
-fn metrics(sp: &forest_core::wp::Sprite, r0: f32) -> (f32, f32) {
+fn metrics(sp: &forest_core::sprite::Sprite, r0: f32) -> (f32, f32) {
     let n = sp.size;
     let occ: Vec<bool> = sp.cls.iter().map(|c| *c != 0).collect();
     let rad = (0.12 * r0) as i32;

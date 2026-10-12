@@ -26,6 +26,12 @@ pub struct Shape {
     /// moved over to `layers` when they are loaded, so this is only ever read.
     #[serde(default, skip_serializing)]
     pub settings: Option<ZoneSettings>,
+    /// A locked zone cannot be moved or edited by accident.
+    #[serde(default)]
+    pub locked: bool,
+    /// A clearing that is a no-trees mask: kept in the zone list apart from the forest, drawn hatched.
+    #[serde(default)]
+    pub mask: bool,
 }
 
 /// A full copy of a layer's settings, as older project files held it.
@@ -41,7 +47,7 @@ fn yes() -> bool {
 
 impl Shape {
     pub fn new(op: ShapeOp, points: Vec<[f32; 2]>) -> Shape {
-        Shape { op, points, name: String::new(), visible: true, group: None, settings: None }
+        Shape { op, points, name: String::new(), visible: true, group: None, settings: None, locked: false, mask: false }
     }
 }
 
@@ -119,65 +125,6 @@ pub struct TreeRec {
     pub seed: u32,
 }
 
-/// Branching recipe used by generated tree sprites.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Form {
-    Oak,
-    Spruce,
-    Sage,
-    Bush,
-    Dead,
-    Birch,
-    Pine,
-    Willow,
-    Cypress,
-    Acacia,
-    // Previewed forms, not yet offered in the app.
-    Palm,
-    Baobab,
-    TreeFern,
-    Cedar,
-    Gnarled,
-    Fern,
-    Wildflower,
-    Log,
-    Stump,
-    MushroomRing,
-    Boulder,
-}
-
-impl Form {
-    pub const ALL: [Form; 10] = [
-        Form::Oak, Form::Spruce, Form::Sage, Form::Bush, Form::Dead,
-        Form::Birch, Form::Pine, Form::Willow, Form::Cypress, Form::Acacia,
-    ];
-    pub fn name(self) -> &'static str {
-        match self {
-            Form::Oak => "Oak (round, lumpy)",
-            Form::Spruce => "Spruce (star, whorled)",
-            Form::Sage => "Sage (open, flame)",
-            Form::Bush => "Bush (low, dense)",
-            Form::Dead => "Dead (bare branches)",
-            Form::Birch => "Birch (light, drooping tips)",
-            Form::Pine => "Pine (sparse, tiered)",
-            Form::Willow => "Willow (wide, weeping)",
-            Form::Cypress => "Cypress (narrow, columnar)",
-            Form::Acacia => "Acacia (flat, wide)",
-            Form::Palm => "Palm (radial fronds)",
-            Form::Baobab => "Baobab (thick, sparse tufts)",
-            Form::TreeFern => "Tree fern (flat fronds)",
-            Form::Cedar => "Weeping cedar (drooping tiers)",
-            Form::Gnarled => "Gnarled (twisted, lopsided)",
-            Form::Fern => "Fern (ground fronds)",
-            Form::Wildflower => "Wildflowers (low specks)",
-            Form::Log => "Fallen log",
-            Form::Stump => "Stump (rings)",
-            Form::MushroomRing => "Mushroom ring",
-            Form::Boulder => "Boulder",
-        }
-    }
-}
-
 /// One kind of tree: how it branches and what colour its leaves are.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -185,29 +132,19 @@ pub struct Species {
     pub name: String,
     /// Multiplies the tree's height, which sets how long its shadow is.
     pub height: f32,
-    /// Leaf size in map pixels, and length to width ratio.
-    pub leaf_size: f32,
-    pub leaf_shape: f32,
-    /// Leaves point outward from the trunk, like needles.
-    pub needles: bool,
-    /// Bare branches, no leaves.
-    pub bare: bool,
     /// Leaf colour ramp, shadow to light, 0..1.
     pub ramp: [[f32; 3]; 4],
     /// Bark, stone or wood colour for the solid parts.
     pub bark: [f32; 3],
-    /// Use the procedural tree type even when procedural trees are off for the forest. Also marks a type
-    /// picked by hand, which themes keep.
+    /// Marks a tree type picked by hand, which themes keep.
     pub procedural: bool,
     /// Which procedural tree type (acer, apple, balsam_fir, palm, ...), see `treegen_sprite::TREE_TYPES`.
     pub preset: String,
     /// Canopy strength for a procedural tree: below zero the type's own, 0 the raw generator.
     pub canopy_fill: f32,
-    /// Branching recipe and how much of it to use.
-    pub form: Form,
-    pub branchiness: f32,
-    pub clumpiness: f32,
-    pub leaf_cover: f32,
+    /// The built-in form of older project files, read only to pick a tree type for species saved without one.
+    #[serde(default, skip_serializing, alias = "form")]
+    legacy_form: String,
 }
 
 fn rgb(c: [[u8; 3]; 4]) -> [[f32; 3]; 4] {
@@ -215,9 +152,25 @@ fn rgb(c: [[u8; 3]; 4]) -> [[f32; 3]; 4] {
 }
 
 impl Species {
-    /// The procedural tree type this species grows as. `all` is the forest-wide procedural trees switch.
-    pub fn tree_type(&self, all: bool) -> Option<&str> {
-        if (all || self.procedural) && !self.preset.is_empty() && !self.bare {
+    /// A new species of tree type `key` with colours and height that suit the kind of tree.
+    pub fn for_type(key: &str) -> Species {
+        let label = crate::treegen_sprite::tree_type_label(key).to_string();
+        let (ramp, bark, height) = match key {
+            "fallen_log" => ([[110, 106, 96], [150, 146, 134], [185, 180, 166], [210, 205, 190]], [150, 144, 130], 0.3),
+            "stump" => ([[70, 54, 36], [104, 82, 56], [140, 112, 76], [176, 146, 100]], [60, 46, 34], 0.3),
+            k if crate::dead::is_dead(k) => ([[44, 42, 38], [78, 74, 66], [112, 108, 98], [150, 146, 134]], [90, 84, 76], 1.0),
+            "balsam_fir" | "douglas_fir" | "small_pine" | "spruce" | "juniper" | "krummholz" => ([[18, 40, 30], [34, 70, 50], [56, 100, 70], [90, 136, 96]], [50, 40, 32], if key == "krummholz" { 0.6 } else { 1.4 }),
+            "european_larch" | "ginkgo" => ([[60, 74, 20], [110, 130, 36], [160, 180, 60], [210, 220, 100]], [60, 46, 34], 1.2),
+            "apple" | "hill_cherry" => ([[120, 60, 80], [200, 110, 140], [236, 160, 184], [250, 210, 224]], [60, 46, 34], 0.9),
+            "acer" => ([[60, 14, 10], [130, 30, 20], [190, 60, 30], [230, 110, 50]], [60, 46, 34], 0.8),
+            _ => ([[26, 44, 20], [52, 82, 32], [92, 128, 48], [140, 170, 76]], [60, 46, 34], 1.0),
+        };
+        Species { name: label, preset: key.to_string(), procedural: true, height, ramp: rgb(ramp), bark: bark.map(|v| v as f32 / 255.0), ..Species::default() }
+    }
+
+    /// The procedural tree type this species grows as.
+    pub fn tree_type(&self) -> Option<&str> {
+        if !self.preset.is_empty() {
             Some(&self.preset)
         } else {
             None
@@ -232,13 +185,14 @@ impl Species {
     /// Give this species the procedural tree type that suits it, if it has none yet.
     pub fn assign_tree_type(&mut self) {
         if self.preset.is_empty() {
-            self.preset = default_tree_type(&self.name, self.form).to_string();
+            self.preset = default_tree_type(&self.name, &self.legacy_form).to_string();
         }
     }
 }
 
-/// The procedural tree type that best matches a species, by name first and then by form. Empty for none.
-pub fn default_tree_type(name: &str, form: Form) -> &'static str {
+/// The procedural tree type that best matches a species, by name first, then by the built-in form older
+/// files stored, and black tupelo when nothing fits.
+pub fn default_tree_type(name: &str, legacy_form: &str) -> &'static str {
     let n = name.to_lowercase();
     let by_name: &[(&str, &str)] = &[
         ("sakura", "hill_cherry"),
@@ -257,25 +211,26 @@ pub fn default_tree_type(name: &str, form: Form) -> &'static str {
         ("autumn", "sassafras"),
         ("golden", "quaking_aspen"),
         ("broadleaf", "quaking_aspen"),
+        ("dead", "dead_oak"),
     ];
     if let Some((_, t)) = by_name.iter().find(|(k, _)| n.contains(k)) {
         return t;
     }
-    match form {
-        Form::Oak => "black_tupelo",
-        Form::Spruce => "balsam_fir",
-        Form::Sage => "quaking_aspen",
-        Form::Bush | Form::Baobab => "black_oak",
-        Form::Birch => "silver_birch",
-        Form::Pine => "small_pine",
-        Form::Willow => "weeping_willow",
-        Form::Cypress => "lombardy_poplar",
-        Form::Acacia => "acer",
-        Form::Palm => "palm",
-        Form::TreeFern => "fan_palm",
-        Form::Cedar => "douglas_fir",
-        Form::Gnarled => "cambridge_oak",
-        _ => "",
+    match legacy_form {
+        "Spruce" => "balsam_fir",
+        "Sage" => "quaking_aspen",
+        "Bush" | "Baobab" => "black_oak",
+        "Birch" => "silver_birch",
+        "Pine" => "small_pine",
+        "Willow" => "weeping_willow",
+        "Cypress" => "lombardy_poplar",
+        "Acacia" => "acer",
+        "Palm" => "palm",
+        "TreeFern" => "fan_palm",
+        "Cedar" => "douglas_fir",
+        "Gnarled" => "cambridge_oak",
+        "Dead" => "dead_oak",
+        _ => "black_tupelo",
     }
 }
 
@@ -284,26 +239,19 @@ impl Default for Species {
         Species {
             name: "Broadleaf".into(),
             height: 1.0,
-            leaf_size: 2.6,
-            leaf_shape: 1.3,
-            needles: false,
-            bare: false,
             ramp: rgb([[22, 36, 12], [48, 70, 24], [82, 110, 40], [128, 156, 64]]),
             bark: [60.0 / 255.0, 46.0 / 255.0, 34.0 / 255.0],
             procedural: false,
             preset: String::new(),
             canopy_fill: -1.0,
-            form: Form::Oak,
-            branchiness: 1.0,
-            clumpiness: 1.0,
-            leaf_cover: 1.0,
+            legacy_form: String::new(),
         }
     }
 }
 
 /// The five mushroom species: cap colours from the ramp, warts in the bark colour.
 pub fn mushroom_species() -> Vec<Species> {
-    let base = Species { procedural: true, height: 1.0, leaf_size: 2.0, ..Species::default() };
+    let base = Species { procedural: true, height: 1.0, ..Species::default() };
     let mk = |name: &str, kind: &str, ramp: [[u8; 3]; 4], wart: [u8; 3]| Species {
         name: name.into(),
         preset: kind.into(),
@@ -325,25 +273,25 @@ pub fn default_species() -> Vec<Species> {
     let b = Species::default();
     let mut v = vec![
         b.clone(),
-        Species { name: "Conifer".into(), height: 1.3, leaf_size: 1.4, leaf_shape: 4.0, needles: true, form: Form::Spruce,
+        Species { name: "Conifer".into(), height: 1.3, preset: "balsam_fir".into(),
             ramp: rgb([[14, 30, 20], [30, 54, 36], [52, 82, 52], [80, 112, 70]]), ..b.clone() },
-        Species { name: "Sage".into(), leaf_size: 2.2, leaf_shape: 1.2, form: Form::Sage,
+        Species { name: "Sage".into(), preset: "quaking_aspen".into(),
             ramp: rgb([[30, 44, 34], [62, 84, 64], [100, 126, 98], [150, 170, 140]]), ..b.clone() },
-        Species { name: "Autumn".into(), leaf_size: 2.8,
+        Species { name: "Autumn".into(),
             ramp: rgb([[50, 22, 8], [120, 52, 14], [186, 96, 26], [232, 164, 60]]), ..b.clone() },
         Species { name: "Golden".into(), ramp: rgb([[44, 38, 8], [104, 92, 20], [170, 150, 40], [224, 206, 92]]), ..b.clone() },
-        Species { name: "Dead".into(), bare: true, form: Form::Dead,
-            ramp: rgb([[40, 34, 28], [74, 64, 52], [112, 98, 80], [150, 136, 112]]), ..b.clone() },
-        Species { name: "Bush".into(), form: Form::Bush, height: 0.5, ..b.clone() },
-        Species { name: "Birch".into(), form: Form::Birch, leaf_size: 2.2, height: 1.1,
+        Species { name: "Dead".into(), preset: "dead_oak".into(),
+            ramp: rgb([[44, 42, 38], [78, 74, 66], [112, 108, 98], [150, 146, 134]]), ..b.clone() },
+        Species { name: "Bush".into(), preset: "black_oak".into(), height: 0.5, ..b.clone() },
+        Species { name: "Birch".into(), preset: "silver_birch".into(), height: 1.1,
             ramp: rgb([[34, 52, 18], [76, 104, 34], [126, 156, 58], [176, 200, 96]]), ..b.clone() },
-        Species { name: "Pine".into(), form: Form::Pine, needles: true, leaf_size: 1.6, leaf_shape: 4.0, height: 1.4,
+        Species { name: "Pine".into(), preset: "small_pine".into(), height: 1.4,
             ramp: rgb([[16, 34, 22], [34, 62, 40], [58, 92, 56], [92, 124, 78]]), ..b.clone() },
-        Species { name: "Willow".into(), form: Form::Willow, leaf_size: 2.0, leaf_shape: 2.5,
+        Species { name: "Willow".into(), preset: "weeping_willow".into(),
             ramp: rgb([[40, 56, 20], [86, 112, 40], [134, 160, 64], [180, 200, 100]]), ..b.clone() },
-        Species { name: "Cypress".into(), form: Form::Cypress, needles: true, leaf_size: 1.3, leaf_shape: 3.0, height: 1.4,
+        Species { name: "Cypress".into(), preset: "lombardy_poplar".into(), height: 1.4,
             ramp: rgb([[12, 28, 18], [26, 50, 32], [44, 74, 46], [70, 100, 62]]), ..b.clone() },
-        Species { name: "Acacia".into(), form: Form::Acacia, leaf_size: 2.0, leaf_shape: 1.6, height: 0.8,
+        Species { name: "Acacia".into(), preset: "acer".into(), height: 0.8,
             ramp: rgb([[54, 54, 22], [100, 100, 36], [150, 146, 58], [196, 188, 94]]), ..b },
     ];
     v.iter_mut().for_each(Species::assign_tree_type);
@@ -363,25 +311,13 @@ pub struct Theme {
     pub haze: [u8; 3],
 }
 
-fn themed(name: &str, form: Form, needles: bool, ramp: [[u8; 3]; 4]) -> Species {
-    let b = Species::default();
-    let (height, leaf_size, leaf_shape) = match form {
-        Form::Spruce | Form::Pine | Form::Cypress => (1.3, 1.4, 4.0),
-        Form::Bush => (0.5, 2.6, 1.3),
-        Form::Willow => (1.0, 2.0, 2.5),
-        Form::Birch => (1.1, 2.2, 1.3),
-        Form::Acacia => (0.8, 2.0, 1.6),
-        Form::Sage => (1.0, 2.2, 1.2),
-        _ => (1.0, 2.6, 1.3),
-    };
-    let mut s = Species { name: name.into(), form, needles, height, leaf_size, leaf_shape, ramp: rgb(ramp), ..b };
-    s.assign_tree_type();
-    s
+fn themed(name: &str, preset: &str, height: f32, ramp: [[u8; 3]; 4]) -> Species {
+    Species { name: name.into(), preset: preset.into(), height, ramp: rgb(ramp), ..Species::default() }
 }
 
 /// A species that grows as one of the procedural tree types, with the colours of its leaves and its wood.
 fn typed(name: &str, preset: &str, ramp: [[u8; 3]; 4], bark: [u8; 3], height: f32) -> Species {
-    Species { name: name.into(), preset: preset.into(), height, ramp: rgb(ramp), bark: bark.map(|v| v as f32 / 255.0), form: Form::Oak, ..Species::default() }
+    Species { name: name.into(), preset: preset.into(), height, ramp: rgb(ramp), bark: bark.map(|v| v as f32 / 255.0), ..Species::default() }
 }
 
 /// How many mushrooms a theme grows and which kinds (redcap, brown, violet, funnel, puffball).
@@ -413,6 +349,8 @@ pub fn theme_canopy(name: &str) -> Option<f32> {
         "Dragon Blood Isle" => Some(0.5),
         "Eucalyptus Woodland" => Some(0.55),
         "Windswept Heath" => Some(0.6),
+        "Juniper Highlands" => Some(0.4),
+        "Acacia Plains" => Some(0.3),
         _ => None,
     }
 }
@@ -432,15 +370,178 @@ pub fn theme_giants(name: &str) -> f32 {
     }
 }
 
+/// Themes made from aerial lidar and hyperspectral imagery (non-essential/research): species colours, ground colours and
+/// the stand's own structure settings, read from `assets/satellite_themes.json`.
+fn satellite_data() -> &'static serde_json::Value {
+    static DATA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+    DATA.get_or_init(|| serde_json::from_str(include_str!("../assets/satellite_themes.json")).unwrap_or(serde_json::Value::Null))
+}
+
+/// The satellite themes in the order the data file gives them, with their names and notes kept for the whole run.
+fn satellite_list() -> &'static [(&'static str, &'static str)] {
+    static LIST: std::sync::OnceLock<Vec<(&'static str, &'static str)>> = std::sync::OnceLock::new();
+    LIST.get_or_init(|| {
+        let mut v: Vec<(i64, &'static str, &'static str)> = Vec::new();
+        if let Some(m) = satellite_data().as_object() {
+            for (name, d) in m {
+                let note = d.get("note").and_then(|n| n.as_str()).unwrap_or("");
+                let order = d.get("order").and_then(|o| o.as_i64()).unwrap_or(i64::MAX);
+                v.push((order, Box::leak(name.clone().into_boxed_str()), Box::leak(note.to_string().into_boxed_str())));
+            }
+        }
+        v.sort_by_key(|x| x.0);
+        v.into_iter().map(|(_, n, d)| (n, d)).collect()
+    })
+}
+
+/// True for a theme measured from aerial lidar and imagery.
+pub fn is_satellite_theme(name: &str) -> bool {
+    satellite_data().get(name).is_some()
+}
+
+fn satellite_theme(name: &'static str, note: &'static str) -> Option<Theme> {
+    let d = satellite_data().get(name)?;
+    let col3 = |v: &serde_json::Value| -> [u8; 3] {
+        let a: Vec<u8> = v.as_array().map(|a| a.iter().map(|x| x.as_u64().unwrap_or(0).min(255) as u8).collect()).unwrap_or_default();
+        [a.first().copied().unwrap_or(0), a.get(1).copied().unwrap_or(0), a.get(2).copied().unwrap_or(0)]
+    };
+    let mut species: Vec<Species> = Vec::new();
+    for s in d.get("species")?.as_array()? {
+        let ramp: Vec<[u8; 3]> = s.get("ramp")?.as_array()?.iter().map(col3).collect();
+        if ramp.len() != 4 {
+            return None;
+        }
+        species.push(typed(s.get("name")?.as_str()?, s.get("preset")?.as_str()?, [ramp[0], ramp[1], ramp[2], ramp[3]], col3(s.get("bark")?), s.get("height")?.as_f64()? as f32));
+    }
+    let species: [Species; 3] = species.try_into().ok()?;
+    Some(Theme { name, note, species, mix_amount: d.get("mix_amount")?.as_f64()? as f32, grass: col3(d.get("grass")?), accent: col3(d.get("accent")?), haze: col3(d.get("haze")?) })
+}
+
+/// How the other themes borrow the natural look of a measured stand: which stand, how much of its look to take (0 keeps
+/// the app's own, 1 takes all of it), and how far to mute and darken the species colours. See `assets/natural_looks.json`.
+fn look_data() -> &'static serde_json::Value {
+    static DATA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+    DATA.get_or_init(|| serde_json::from_str(include_str!("../assets/natural_looks.json")).unwrap_or(serde_json::Value::Null))
+}
+
+fn look_entry(name: &str) -> Option<&'static serde_json::Value> {
+    let d = look_data();
+    d.get("themes").and_then(|t| t.get(name)).or_else(|| d.get("default"))
+}
+
+/// The settings that make a stand look natural and not sizes or counts: how much crowns differ from each other, how
+/// they are shaded, and how the light plays on the leaves.
+const LOOK_DEPTH: [&str; 12] = ["gain", "gamma", "crown_tone", "crown_shade", "height_var", "cluster_tone", "crown_var", "depth_strength", "weave", "canopy_ao", "translucency", "lumps"];
+const LOOK_LEAF: [&str; 5] = ["mottling", "mottle_size", "tree_lean", "dappled", "variety"];
+
+/// The natural look a plain theme takes from a measured stand, as a sparse settings object.
+pub fn natural_look(name: &str) -> Option<serde_json::Value> {
+    let e = look_entry(name)?;
+    let src = theme_settings(e.get("from")?.as_str()?)?;
+    let k = e.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.5);
+    let def = serde_json::to_value(GenParams::default()).ok()?;
+    let mut out = serde_json::Map::new();
+    for (group, keys) in [("depth", &LOOK_DEPTH[..]), ("leaf", &LOOK_LEAF[..])] {
+        let mut o = serde_json::Map::new();
+        for key in keys {
+            let (Some(d), Some(t)) = (def.get(group).and_then(|g| g.get(*key)).and_then(|v| v.as_f64()), src.get(group).and_then(|g| g.get(*key)).and_then(|v| v.as_f64())) else { continue };
+            o.insert((*key).into(), serde_json::json!(d + (t - d) * k));
+        }
+        out.insert(group.into(), serde_json::Value::Object(o));
+    }
+    // layout: how open the forest is and how its trees group, taken from the stand at its own strength
+    let lay = e.get("layout").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let take = |key: &str| -> Option<(f64, f64)> { Some((def.get(key)?.as_f64()?, src.get(key)?.as_f64()?)) };
+    if lay > 0.0 {
+        for key in ["gaps", "gap_size", "canopy_patch_size", "shrub_density", "grass_density", "crown_lean"] {
+            if let Some((d, t)) = take(key) {
+                out.insert(key.into(), serde_json::json!(d + (t - d) * lay));
+            }
+        }
+    }
+    // tree size: the stand's crowns at its strength, then scaled for what the theme's trees are. The forest size setting
+    // is left to the user.
+    let c = e.get("crown").and_then(|v| v.as_f64()).unwrap_or(1.0);
+    let (lo, hi) = (def.get("crown_min").and_then(|v| v.as_f64()).unwrap_or(10.0), def.get("crown_max").and_then(|v| v.as_f64()).unwrap_or(17.0));
+    let (slo, shi) = (src.get("crown_min").and_then(|v| v.as_f64()).unwrap_or(lo), src.get("crown_max").and_then(|v| v.as_f64()).unwrap_or(hi));
+    out.insert("crown_min".into(), serde_json::json!((lo + (slo - lo) * lay) * c));
+    out.insert("crown_max".into(), serde_json::json!((hi + (shi - hi) * lay) * c));
+    Some(serde_json::Value::Object(out))
+}
+
+/// Mute and darken a species ramp the way real canopy is: foliage seen from the air is greyer and darker than the
+/// colours a palette starts with.
+fn natural_ramp(name: &str, sp: &mut Species) {
+    let Some(e) = look_entry(name) else { return };
+    let sat = e.get("sat").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+    let val = e.get("val").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+    for c in sp.ramp.iter_mut() {
+        let grey = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+        for v in c.iter_mut() {
+            *v = ((grey + (*v - grey) * sat) * val).clamp(0.0, 1.0);
+        }
+    }
+    // colour variation: the stand's own steps of lightness, saturation and hue from dark leaves to lit ones, laid over the
+    // theme's colours, so a violet or a crimson canopy varies the way a real one does
+    let tone = e.get("tone").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let Some(stand) = e.get("from").and_then(|f| f.as_str()).and_then(|f| satellite_data().get(f)).and_then(|d| d.get("species")).and_then(|s| s.get(0)).and_then(|s| s.get("ramp")).and_then(|r| r.as_array()) else { return };
+    if tone <= 0.0 || stand.len() != 4 {
+        return;
+    }
+    let st: Vec<[f32; 3]> = stand.iter().map(|c| { let a: Vec<f32> = c.as_array().map(|a| a.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32 / 255.0).collect()).unwrap_or_default(); [a.first().copied().unwrap_or(0.0), a.get(1).copied().unwrap_or(0.0), a.get(2).copied().unwrap_or(0.0)] }).collect();
+    let hsv_st: Vec<[f32; 3]> = st.iter().map(|c| rgb_to_hsv(*c)).collect();
+    let mean_h = hsv_st.iter().map(|h| h[0]).sum::<f32>() / 4.0;
+    for (i, c) in sp.ramp.iter_mut().enumerate() {
+        let mut h = rgb_to_hsv(*c);
+        let s = hsv_st[i];
+        h[2] = h[2] + (s[2] - h[2]) * tone;
+        h[1] = h[1].min(h[1] + (s[1] * 1.3 + 0.12 - h[1]) * tone);
+        h[0] = (h[0] + (s[0] - mean_h) * 0.6 * tone).rem_euclid(1.0);
+        *c = hsv_to_rgb(h);
+    }
+}
+
+fn rgb_to_hsv(c: [f32; 3]) -> [f32; 3] {
+    let (mx, mn) = (c[0].max(c[1]).max(c[2]), c[0].min(c[1]).min(c[2]));
+    let d = mx - mn;
+    let h = if d < 1e-6 { 0.0 } else if mx == c[0] { ((c[1] - c[2]) / d).rem_euclid(6.0) } else if mx == c[1] { (c[2] - c[0]) / d + 2.0 } else { (c[0] - c[1]) / d + 4.0 };
+    [h / 6.0, if mx <= 1e-6 { 0.0 } else { d / mx }, mx]
+}
+
+fn hsv_to_rgb(h: [f32; 3]) -> [f32; 3] {
+    let (hh, s, v) = (h[0].rem_euclid(1.0) * 6.0, h[1].clamp(0.0, 1.0), h[2].clamp(0.0, 1.0));
+    let (i, f) = (hh.floor(), hh - hh.floor());
+    let (p, q, t) = (v * (1.0 - s), v * (1.0 - s * f), v * (1.0 - s * (1.0 - f)));
+    match i as i32 % 6 {
+        0 => [v, t, p],
+        1 => [q, v, p],
+        2 => [p, v, t],
+        3 => [p, q, v],
+        4 => [t, p, v],
+        _ => [v, p, q],
+    }
+}
+
+/// The structure settings a satellite theme carries, as a sparse settings object, or None for other themes.
+pub fn theme_settings(name: &str) -> Option<serde_json::Value> {
+    satellite_data().get(name)?.get("gen").cloned()
+}
+
 pub fn themes() -> Vec<Theme> {
+    let mut v = base_themes();
+    v.extend(satellite_list().iter().filter_map(|(n, note)| satellite_theme(n, note)));
+    v
+}
+
+fn base_themes() -> Vec<Theme> {
     vec![
         Theme {
             name: "Temperate",
             note: "Ordinary green woodland",
             species: [
-                themed("Broadleaf", Form::Oak, false, [[22, 36, 12], [48, 70, 24], [82, 110, 40], [128, 156, 64]]),
-                themed("Conifer", Form::Spruce, true, [[14, 30, 20], [30, 54, 36], [52, 82, 52], [80, 112, 70]]),
-                themed("Bush", Form::Bush, false, [[22, 36, 12], [48, 70, 24], [82, 110, 40], [128, 156, 64]]),
+                themed("Broadleaf", "quaking_aspen", 1.0, [[22, 36, 12], [48, 70, 24], [82, 110, 40], [128, 156, 64]]),
+                themed("Conifer", "balsam_fir", 1.3, [[14, 30, 20], [30, 54, 36], [52, 82, 52], [80, 112, 70]]),
+                themed("Bush", "black_oak", 0.5, [[22, 36, 12], [48, 70, 24], [82, 110, 40], [128, 156, 64]]),
             ],
             mix_amount: 0.0,
             grass: [70, 86, 40],
@@ -451,9 +552,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Autumn",
             note: "Rust and gold leaves",
             species: [
-                themed("Autumn Oak", Form::Oak, false, [[50, 22, 8], [120, 52, 14], [186, 96, 26], [232, 164, 60]]),
-                themed("Golden Birch", Form::Birch, false, [[44, 38, 8], [104, 92, 20], [170, 150, 40], [224, 206, 92]]),
-                themed("Rust Bush", Form::Bush, false, [[56, 26, 10], [110, 54, 18], [170, 96, 30], [212, 150, 62]]),
+                themed("Autumn Oak", "sassafras", 1.0, [[50, 22, 8], [120, 52, 14], [186, 96, 26], [232, 164, 60]]),
+                themed("Golden Birch", "quaking_aspen", 1.1, [[44, 38, 8], [104, 92, 20], [170, 150, 40], [224, 206, 92]]),
+                themed("Rust Bush", "black_oak", 0.5, [[56, 26, 10], [110, 54, 18], [170, 96, 30], [212, 150, 62]]),
             ],
             mix_amount: 0.4,
             grass: [96, 84, 40],
@@ -464,9 +565,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Hellscape",
             note: "Petrified grey stone trees on ash",
             species: [
-                themed("Petrified Oak", Form::Oak, false, [[26, 22, 22], [62, 54, 50], [104, 92, 84], [152, 138, 122]]),
-                themed("Stone Spire", Form::Spruce, true, [[20, 18, 20], [46, 40, 42], [82, 72, 70], [124, 110, 102]]),
-                themed("Slag Thorn", Form::Bush, false, [[30, 24, 22], [70, 56, 48], [114, 90, 72], [162, 130, 98]]),
+                themed("Petrified Oak", "dead_oak", 1.0, [[26, 22, 22], [62, 54, 50], [104, 92, 84], [152, 138, 122]]),
+                themed("Stone Spire", "balsam_fir", 1.3, [[20, 18, 20], [46, 40, 42], [82, 72, 70], [124, 110, 102]]),
+                themed("Slag Thorn", "black_oak", 0.5, [[30, 24, 22], [70, 56, 48], [114, 90, 72], [162, 130, 98]]),
             ],
             mix_amount: 0.3,
             grass: [72, 64, 60],
@@ -477,9 +578,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Ember Waste",
             note: "Charred trees, ember glow",
             species: [
-                themed("Cinder Oak", Form::Oak, false, [[18, 8, 8], [58, 16, 12], [128, 36, 16], [214, 92, 28]]),
-                themed("Ashen Spruce", Form::Spruce, true, [[16, 12, 14], [40, 24, 26], [80, 38, 34], [132, 62, 46]]),
-                themed("Ember Thorn", Form::Bush, false, [[20, 8, 8], [70, 18, 12], [150, 44, 18], [232, 112, 34]]),
+                themed("Cinder Oak", "burnt_oak", 1.0, [[18, 8, 8], [58, 16, 12], [128, 36, 16], [214, 92, 28]]),
+                themed("Ashen Spruce", "burnt_pine", 1.3, [[16, 12, 14], [40, 24, 26], [80, 38, 34], [132, 62, 46]]),
+                themed("Ember Thorn", "black_oak", 0.5, [[20, 8, 8], [70, 18, 12], [150, 44, 18], [232, 112, 34]]),
             ],
             mix_amount: 0.35,
             grass: [58, 36, 32],
@@ -490,9 +591,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Feywild",
             note: "Lush violet, teal and pink",
             species: [
-                themed("Fey Oak", Form::Oak, false, [[30, 22, 74], [74, 52, 136], [126, 92, 190], [196, 156, 232]]),
-                themed("Fey Willow", Form::Willow, false, [[16, 60, 70], [30, 110, 112], [70, 168, 150], [150, 224, 190]]),
-                themed("Glow Shrub", Form::Bush, false, [[70, 24, 80], [140, 46, 140], [214, 90, 180], [250, 168, 220]]),
+                themed("Fey Oak", "hill_cherry", 1.0, [[30, 22, 74], [74, 52, 136], [126, 92, 190], [196, 156, 232]]),
+                themed("Fey Willow", "weeping_willow", 1.0, [[16, 60, 70], [30, 110, 112], [70, 168, 150], [150, 224, 190]]),
+                themed("Glow Shrub", "apple", 0.5, [[70, 24, 80], [140, 46, 140], [214, 90, 180], [250, 168, 220]]),
             ],
             mix_amount: 0.4,
             grass: [54, 124, 100],
@@ -503,9 +604,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Shadowfell",
             note: "Drained grey and cold purple",
             species: [
-                themed("Gloom Oak", Form::Oak, false, [[14, 14, 20], [36, 34, 50], [66, 62, 88], [108, 102, 130]]),
-                themed("Gloom Cypress", Form::Cypress, true, [[10, 12, 16], [24, 28, 38], [44, 50, 64], [74, 80, 98]]),
-                themed("Gloom Thicket", Form::Bush, false, [[14, 14, 18], [34, 32, 44], [60, 56, 76], [96, 90, 116]]),
+                themed("Gloom Oak", "black_tupelo", 1.0, [[14, 14, 20], [36, 34, 50], [66, 62, 88], [108, 102, 130]]),
+                themed("Gloom Cypress", "lombardy_poplar", 1.3, [[10, 12, 16], [24, 28, 38], [44, 50, 64], [74, 80, 98]]),
+                themed("Gloom Thicket", "black_oak", 0.5, [[14, 14, 18], [34, 32, 44], [60, 56, 76], [96, 90, 116]]),
             ],
             mix_amount: 0.3,
             grass: [44, 46, 54],
@@ -516,9 +617,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Frozen",
             note: "Frosted pines and pale birch",
             species: [
-                themed("Frost Spruce", Form::Spruce, true, [[24, 44, 52], [60, 92, 100], [130, 164, 170], [214, 232, 236]]),
-                themed("Frost Birch", Form::Birch, false, [[50, 62, 70], [100, 118, 128], [170, 188, 196], [228, 240, 244]]),
-                themed("Frost Bush", Form::Bush, false, [[44, 58, 66], [92, 112, 122], [160, 182, 190], [222, 236, 240]]),
+                themed("Frost Spruce", "balsam_fir", 1.3, [[24, 44, 52], [60, 92, 100], [130, 164, 170], [214, 232, 236]]),
+                themed("Frost Birch", "silver_birch", 1.1, [[50, 62, 70], [100, 118, 128], [170, 188, 196], [228, 240, 244]]),
+                themed("Frost Bush", "black_oak", 0.5, [[44, 58, 66], [92, 112, 122], [160, 182, 190], [222, 236, 240]]),
             ],
             mix_amount: 0.3,
             grass: [150, 166, 172],
@@ -529,9 +630,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Swamp",
             note: "Murky olive and weeping willow",
             species: [
-                themed("Bog Willow", Form::Willow, false, [[22, 28, 12], [54, 64, 24], [96, 106, 40], [142, 150, 66]]),
-                themed("Mire Oak", Form::Oak, false, [[18, 30, 20], [40, 62, 38], [72, 96, 56], [110, 132, 80]]),
-                themed("Reed Bush", Form::Bush, false, [[30, 36, 14], [66, 76, 28], [110, 120, 46], [156, 164, 74]]),
+                themed("Bog Willow", "weeping_willow", 1.0, [[22, 28, 12], [54, 64, 24], [96, 106, 40], [142, 150, 66]]),
+                themed("Mire Oak", "black_tupelo", 1.0, [[18, 30, 20], [40, 62, 38], [72, 96, 56], [110, 132, 80]]),
+                themed("Reed Bush", "black_oak", 0.5, [[30, 36, 14], [66, 76, 28], [110, 120, 46], [156, 164, 74]]),
             ],
             mix_amount: 0.35,
             grass: [60, 70, 34],
@@ -542,9 +643,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Savanna",
             note: "Dry acacia and sage",
             species: [
-                themed("Acacia", Form::Acacia, false, [[54, 54, 22], [100, 100, 36], [150, 146, 58], [196, 188, 94]]),
-                themed("Dry Sage", Form::Sage, false, [[56, 58, 34], [100, 104, 62], [148, 150, 96], [196, 194, 138]]),
-                themed("Scrub", Form::Bush, false, [[60, 56, 26], [110, 100, 40], [160, 146, 62], [204, 190, 100]]),
+                themed("Acacia", "acer", 0.8, [[54, 54, 22], [100, 100, 36], [150, 146, 58], [196, 188, 94]]),
+                themed("Dry Sage", "quaking_aspen", 1.0, [[56, 58, 34], [100, 104, 62], [148, 150, 96], [196, 194, 138]]),
+                themed("Scrub", "black_oak", 0.5, [[60, 56, 26], [110, 100, 40], [160, 146, 62], [204, 190, 100]]),
             ],
             mix_amount: 0.3,
             grass: [136, 120, 66],
@@ -555,9 +656,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Jungle",
             note: "Deep saturated green",
             species: [
-                themed("Jungle Oak", Form::Oak, false, [[10, 36, 16], [20, 74, 30], [40, 120, 44], [96, 176, 70]]),
-                themed("Jungle Willow", Form::Willow, false, [[12, 42, 30], [24, 86, 56], [50, 134, 80], [110, 190, 120]]),
-                themed("Fern Bush", Form::Bush, false, [[14, 44, 18], [30, 88, 34], [58, 138, 52], [118, 190, 86]]),
+                themed("Jungle Oak", "black_tupelo", 1.0, [[10, 36, 16], [20, 74, 30], [40, 120, 44], [96, 176, 70]]),
+                themed("Jungle Willow", "weeping_willow", 1.0, [[12, 42, 30], [24, 86, 56], [50, 134, 80], [110, 190, 120]]),
+                themed("Fern Bush", "fan_palm", 0.5, [[14, 44, 18], [30, 88, 34], [58, 138, 52], [118, 190, 86]]),
             ],
             mix_amount: 0.35,
             grass: [44, 96, 44],
@@ -568,9 +669,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Crystal Grove",
             note: "Glassy cyan and violet, glittering ground",
             species: [
-                themed("Crystal Cypress", Form::Cypress, true, [[30, 60, 84], [70, 130, 160], [140, 205, 224], [230, 248, 255]]),
-                themed("Glass Birch", Form::Birch, false, [[60, 50, 110], [110, 100, 180], [170, 160, 230], [226, 222, 255]]),
-                themed("Shard Bush", Form::Bush, false, [[20, 70, 90], [40, 120, 150], [90, 180, 210], [180, 236, 252]]),
+                themed("Crystal Cypress", "lombardy_poplar", 1.3, [[30, 60, 84], [70, 130, 160], [140, 205, 224], [230, 248, 255]]),
+                themed("Glass Birch", "silver_birch", 1.1, [[60, 50, 110], [110, 100, 180], [170, 160, 230], [226, 222, 255]]),
+                themed("Shard Bush", "black_oak", 0.5, [[20, 70, 90], [40, 120, 150], [90, 180, 210], [180, 236, 252]]),
             ],
             mix_amount: 0.35,
             grass: [60, 80, 100],
@@ -581,9 +682,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Fungal",
             note: "Giant caps in teal and magenta, glowing spores",
             species: [
-                themed("Cap Tree", Form::Acacia, false, [[50, 20, 70], [110, 40, 120], [180, 70, 170], [236, 140, 214]]),
-                themed("Spore Cluster", Form::Bush, false, [[10, 60, 66], [20, 120, 120], [60, 190, 170], [140, 240, 210]]),
-                themed("Glow Cap", Form::Bush, false, [[70, 26, 60], [150, 50, 110], [220, 100, 170], [255, 190, 226]]),
+                themed("Cap Tree", "acer", 0.8, [[50, 20, 70], [110, 40, 120], [180, 70, 170], [236, 140, 214]]),
+                themed("Spore Cluster", "black_oak", 0.5, [[10, 60, 66], [20, 120, 120], [60, 190, 170], [140, 240, 210]]),
+                themed("Glow Cap", "black_oak", 0.5, [[70, 26, 60], [150, 50, 110], [220, 100, 170], [255, 190, 226]]),
             ],
             mix_amount: 0.4,
             grass: [34, 24, 40],
@@ -594,9 +695,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Celestial",
             note: "Gold and ivory leaves on pale ground",
             species: [
-                themed("Gilded Birch", Form::Birch, false, [[90, 70, 20], [170, 140, 50], [230, 200, 100], [255, 240, 180]]),
-                themed("Ivory Willow", Form::Willow, false, [[150, 140, 110], [210, 200, 170], [240, 232, 208], [255, 252, 236]]),
-                themed("Halo Bush", Form::Bush, false, [[120, 100, 40], [200, 170, 80], [244, 220, 130], [255, 246, 200]]),
+                themed("Gilded Birch", "ginkgo", 1.1, [[90, 70, 20], [170, 140, 50], [230, 200, 100], [255, 240, 180]]),
+                themed("Ivory Willow", "weeping_willow", 1.0, [[150, 140, 110], [210, 200, 170], [240, 232, 208], [255, 252, 236]]),
+                themed("Halo Bush", "black_oak", 0.5, [[120, 100, 40], [200, 170, 80], [244, 220, 130], [255, 246, 200]]),
             ],
             mix_amount: 0.35,
             grass: [200, 190, 150],
@@ -607,9 +708,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Astral",
             note: "Deep indigo trees, starry ground",
             species: [
-                themed("Night Cypress", Form::Cypress, true, [[8, 12, 40], [20, 30, 80], [44, 60, 130], [90, 110, 190]]),
-                themed("Star Willow", Form::Willow, false, [[14, 20, 60], [34, 50, 110], [70, 90, 170], [140, 160, 230]]),
-                themed("Dusk Bush", Form::Bush, false, [[10, 14, 44], [28, 38, 90], [56, 74, 140], [110, 130, 200]]),
+                themed("Night Cypress", "lombardy_poplar", 1.3, [[8, 12, 40], [20, 30, 80], [44, 60, 130], [90, 110, 190]]),
+                themed("Star Willow", "weeping_willow", 1.0, [[14, 20, 60], [34, 50, 110], [70, 90, 170], [140, 160, 230]]),
+                themed("Dusk Bush", "black_oak", 0.5, [[10, 14, 44], [28, 38, 90], [56, 74, 140], [110, 130, 200]]),
             ],
             mix_amount: 0.3,
             grass: [18, 22, 50],
@@ -620,9 +721,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Blighted",
             note: "Sickly yellow-green and bruised purple",
             species: [
-                themed("Blight Willow", Form::Willow, false, [[40, 44, 10], [90, 100, 20], [150, 160, 40], [200, 210, 80]]),
-                themed("Rot Oak", Form::Oak, false, [[40, 20, 50], [80, 40, 96], [126, 70, 140], [170, 110, 180]]),
-                themed("Toxic Bush", Form::Bush, false, [[30, 50, 10], [70, 110, 20], [130, 180, 40], [190, 240, 80]]),
+                themed("Blight Willow", "weeping_willow", 1.0, [[40, 44, 10], [90, 100, 20], [150, 160, 40], [200, 210, 80]]),
+                themed("Rot Oak", "stag_oak", 1.0, [[40, 20, 50], [80, 40, 96], [126, 70, 140], [170, 110, 180]]),
+                themed("Toxic Bush", "black_oak", 0.5, [[30, 50, 10], [70, 110, 20], [130, 180, 40], [190, 240, 80]]),
             ],
             mix_amount: 0.35,
             grass: [58, 60, 30],
@@ -633,9 +734,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Bloodwood",
             note: "Lush deep crimson leaves",
             species: [
-                themed("Bloodwood", Form::Oak, false, [[60, 8, 16], [110, 18, 28], [168, 34, 44], [220, 80, 80]]),
-                themed("Crimson Birch", Form::Birch, false, [[80, 14, 24], [140, 30, 40], [196, 60, 64], [240, 120, 116]]),
-                themed("Redthorn", Form::Bush, false, [[50, 10, 18], [100, 20, 30], [150, 34, 44], [200, 64, 72]]),
+                themed("Bloodwood", "black_tupelo", 1.0, [[60, 8, 16], [110, 18, 28], [168, 34, 44], [220, 80, 80]]),
+                themed("Crimson Birch", "silver_birch", 1.1, [[80, 14, 24], [140, 30, 40], [196, 60, 64], [240, 120, 116]]),
+                themed("Redthorn", "black_oak", 0.5, [[50, 10, 18], [100, 20, 30], [150, 34, 44], [200, 64, 72]]),
             ],
             mix_amount: 0.35,
             grass: [30, 40, 28],
@@ -646,9 +747,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Silverwood",
             note: "Silver-blue leaves, pale cool ground",
             species: [
-                themed("Silverleaf", Form::Birch, false, [[40, 56, 70], [86, 110, 130], [150, 176, 196], [220, 236, 246]]),
-                themed("Moon Willow", Form::Willow, false, [[50, 66, 84], [100, 128, 150], [164, 192, 212], [226, 240, 250]]),
-                themed("Silver Bush", Form::Bush, false, [[40, 56, 66], [84, 108, 124], [140, 166, 184], [206, 226, 238]]),
+                themed("Silverleaf", "silver_birch", 1.1, [[40, 56, 70], [86, 110, 130], [150, 176, 196], [220, 236, 246]]),
+                themed("Moon Willow", "weeping_willow", 1.0, [[50, 66, 84], [100, 128, 150], [164, 192, 212], [226, 240, 250]]),
+                themed("Silver Bush", "black_oak", 0.5, [[40, 56, 66], [84, 108, 124], [140, 166, 184], [206, 226, 238]]),
             ],
             mix_amount: 0.35,
             grass: [86, 104, 116],
@@ -659,9 +760,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Mediterranean",
             note: "Olive and stone pine on dry tan ground",
             species: [
-                themed("Stone Pine", Form::Pine, true, [[34, 48, 28], [66, 84, 46], [108, 124, 74], [156, 168, 110]]),
-                themed("Olive", Form::Sage, false, [[60, 70, 50], [104, 118, 84], [150, 164, 122], [196, 206, 166]]),
-                themed("Maquis", Form::Bush, false, [[50, 58, 34], [92, 104, 56], [140, 150, 84], [184, 190, 120]]),
+                themed("Stone Pine", "small_pine", 1.3, [[34, 48, 28], [66, 84, 46], [108, 124, 74], [156, 168, 110]]),
+                themed("Olive", "sphere_tree", 1.0, [[60, 70, 50], [104, 118, 84], [150, 164, 122], [196, 206, 166]]),
+                themed("Maquis", "black_oak", 0.5, [[50, 58, 34], [92, 104, 56], [140, 150, 84], [184, 190, 120]]),
             ],
             mix_amount: 0.3,
             grass: [150, 130, 84],
@@ -672,9 +773,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Taiga",
             note: "Dark boreal spruce, lichen on mossy ground",
             species: [
-                themed("Boreal Spruce", Form::Spruce, true, [[10, 26, 24], [24, 52, 46], [44, 82, 70], [74, 114, 96]]),
-                themed("Scots Pine", Form::Pine, true, [[20, 38, 26], [44, 70, 44], [76, 106, 66], [112, 140, 92]]),
-                themed("Bilberry", Form::Bush, false, [[30, 44, 28], [64, 84, 44], [104, 124, 66], [150, 164, 100]]),
+                themed("Boreal Spruce", "balsam_fir", 1.3, [[10, 26, 24], [24, 52, 46], [44, 82, 70], [74, 114, 96]]),
+                themed("Scots Pine", "small_pine", 1.3, [[20, 38, 26], [44, 70, 44], [76, 106, 66], [112, 140, 92]]),
+                themed("Bilberry", "black_oak", 0.5, [[30, 44, 28], [64, 84, 44], [104, 124, 66], [150, 164, 100]]),
             ],
             mix_amount: 0.3,
             grass: [78, 74, 56],
@@ -685,9 +786,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Cherry Blossom",
             note: "Pink and white blossom, petals on green",
             species: [
-                themed("Sakura", Form::Oak, false, [[120, 60, 80], [200, 110, 140], [240, 170, 196], [255, 222, 232]]),
-                themed("White Blossom", Form::Birch, false, [[150, 130, 140], [220, 200, 210], [246, 236, 240], [255, 250, 252]]),
-                themed("Azalea", Form::Bush, false, [[90, 40, 70], [170, 70, 120], [226, 120, 170], [252, 190, 214]]),
+                themed("Sakura", "hill_cherry", 1.0, [[120, 60, 80], [200, 110, 140], [240, 170, 196], [255, 222, 232]]),
+                themed("White Blossom", "hill_cherry", 1.1, [[150, 130, 140], [220, 200, 210], [246, 236, 240], [255, 250, 252]]),
+                themed("Azalea", "apple", 0.5, [[90, 40, 70], [170, 70, 120], [226, 120, 170], [252, 190, 214]]),
             ],
             mix_amount: 0.35,
             grass: [90, 130, 70],
@@ -698,9 +799,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Redwood",
             note: "Very dark, wet temperate rainforest",
             species: [
-                themed("Redwood", Form::Spruce, true, [[6, 24, 14], [14, 50, 28], [28, 84, 44], [56, 120, 70]]),
-                themed("Hemlock", Form::Spruce, true, [[10, 34, 24], [24, 64, 44], [46, 98, 66], [84, 136, 96]]),
-                themed("Sword Fern", Form::Bush, false, [[10, 40, 20], [22, 82, 34], [44, 128, 52], [90, 176, 84]]),
+                themed("Redwood", "douglas_fir", 1.3, [[6, 24, 14], [14, 50, 28], [28, 84, 44], [56, 120, 70]]),
+                themed("Hemlock", "douglas_fir", 1.3, [[10, 34, 24], [24, 64, 44], [46, 98, 66], [84, 136, 96]]),
+                themed("Sword Fern", "fan_palm", 0.5, [[10, 40, 20], [22, 82, 34], [44, 128, 52], [90, 176, 84]]),
             ],
             mix_amount: 0.3,
             grass: [40, 52, 30],
@@ -711,9 +812,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Badlands",
             note: "Sparse scrub on red rock",
             species: [
-                themed("Juniper", Form::Sage, false, [[50, 60, 34], [90, 104, 56], [132, 146, 84], [176, 186, 120]]),
-                themed("Mesquite", Form::Acacia, false, [[60, 56, 28], [106, 98, 44], [150, 140, 70], [194, 182, 110]]),
-                themed("Sagebrush", Form::Bush, false, [[70, 76, 56], [116, 124, 92], [160, 168, 130], [204, 210, 170]]),
+                themed("Juniper", "small_pine", 1.0, [[50, 60, 34], [90, 104, 56], [132, 146, 84], [176, 186, 120]]),
+                themed("Mesquite", "acer", 0.8, [[60, 56, 28], [106, 98, 44], [150, 140, 70], [194, 182, 110]]),
+                themed("Sagebrush", "black_oak", 0.5, [[70, 76, 56], [116, 124, 92], [160, 168, 130], [204, 210, 170]]),
             ],
             mix_amount: 0.3,
             grass: [160, 92, 60],
@@ -724,9 +825,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Volcanic",
             note: "Tough green trees on black ash with glowing cracks",
             species: [
-                themed("Ash Pine", Form::Pine, true, [[24, 40, 24], [50, 74, 38], [86, 112, 58], [126, 150, 86]]),
-                themed("Scorch Sage", Form::Sage, false, [[50, 44, 34], [90, 80, 56], [132, 116, 80], [176, 160, 112]]),
-                themed("Lava Scrub", Form::Bush, false, [[40, 34, 26], [84, 66, 40], [130, 96, 52], [176, 130, 70]]),
+                themed("Ash Pine", "small_pine", 1.3, [[24, 40, 24], [50, 74, 38], [86, 112, 58], [126, 150, 86]]),
+                themed("Scorch Sage", "quaking_aspen", 1.0, [[50, 44, 34], [90, 80, 56], [132, 116, 80], [176, 160, 112]]),
+                themed("Lava Scrub", "black_oak", 0.5, [[40, 34, 26], [84, 66, 40], [130, 96, 52], [176, 130, 70]]),
             ],
             mix_amount: 0.3,
             grass: [40, 36, 36],
@@ -737,9 +838,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Alpine",
             note: "Cold conifers, bare rock and snow patches",
             species: [
-                themed("Mountain Spruce", Form::Spruce, true, [[16, 34, 36], [34, 64, 62], [64, 98, 94], [104, 138, 130]]),
-                themed("Dwarf Juniper", Form::Cypress, true, [[26, 44, 40], [54, 80, 70], [90, 116, 102], [132, 156, 140]]),
-                themed("Alpine Heath", Form::Bush, false, [[50, 60, 50], [96, 110, 92], [142, 156, 134], [188, 200, 178]]),
+                themed("Mountain Spruce", "balsam_fir", 1.3, [[16, 34, 36], [34, 64, 62], [64, 98, 94], [104, 138, 130]]),
+                themed("Dwarf Juniper", "small_pine", 1.3, [[26, 44, 40], [54, 80, 70], [90, 116, 102], [132, 156, 140]]),
+                themed("Alpine Heath", "black_oak", 0.5, [[50, 60, 50], [96, 110, 92], [142, 156, 134], [188, 200, 178]]),
             ],
             mix_amount: 0.3,
             grass: [128, 130, 128],
@@ -750,9 +851,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Bamboo",
             note: "Fresh yellow-green eastern forest",
             species: [
-                themed("Bamboo Grove", Form::Willow, false, [[30, 60, 18], [70, 120, 34], [130, 180, 60], [190, 226, 100]]),
-                themed("Tea Birch", Form::Birch, false, [[44, 76, 26], [96, 140, 50], [150, 192, 78], [204, 232, 120]]),
-                themed("Dwarf Bamboo", Form::Bush, false, [[36, 70, 22], [84, 130, 40], [140, 190, 64], [196, 236, 106]]),
+                themed("Bamboo Grove", "bamboo", 1.0, [[30, 60, 18], [70, 120, 34], [130, 180, 60], [190, 226, 100]]),
+                themed("Tea Birch", "silver_birch", 1.1, [[44, 76, 26], [96, 140, 50], [150, 192, 78], [204, 232, 120]]),
+                themed("Dwarf Bamboo", "bamboo", 0.5, [[36, 70, 22], [84, 130, 40], [140, 190, 64], [196, 236, 106]]),
             ],
             mix_amount: 0.3,
             grass: [92, 130, 50],
@@ -763,9 +864,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Mangrove",
             note: "Teal-green tidal forest on wet ground",
             species: [
-                themed("Mangrove", Form::Willow, false, [[14, 50, 40], [30, 90, 66], [60, 134, 92], [110, 180, 130]]),
-                themed("Buttonwood", Form::Oak, false, [[24, 56, 34], [52, 96, 56], [90, 136, 84], [134, 176, 120]]),
-                themed("Salt Shrub", Form::Bush, false, [[30, 60, 50], [66, 100, 80], [110, 140, 112], [156, 184, 150]]),
+                themed("Mangrove", "weeping_willow_o", 1.0, [[14, 50, 40], [30, 90, 66], [60, 134, 92], [110, 180, 130]]),
+                themed("Buttonwood", "black_tupelo", 1.0, [[24, 56, 34], [52, 96, 56], [90, 136, 84], [134, 176, 120]]),
+                themed("Salt Shrub", "black_oak", 0.5, [[30, 60, 50], [66, 100, 80], [110, 140, 112], [156, 184, 150]]),
             ],
             mix_amount: 0.35,
             grass: [86, 92, 60],
@@ -776,9 +877,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Dead Forest",
             note: "Standing dead oaks and stag-headed trees on grey ground",
             species: [
-                typed("Dead Oak", "dead_oak", [[40, 34, 28], [74, 64, 52], [112, 98, 80], [150, 136, 112]], [150, 142, 128], 1.0),
+                typed("Dead Oak", "dead_oak", [[44, 42, 38], [78, 74, 66], [112, 108, 98], [150, 146, 134]], [150, 142, 128], 1.0),
                 typed("Stag Oak", "stag_oak", [[34, 40, 16], [66, 78, 28], [104, 116, 44], [146, 156, 70]], [118, 106, 90], 1.0),
-                typed("Dry Scrub", "bare_oak", [[40, 34, 28], [74, 64, 52], [112, 98, 80], [150, 136, 112]], [96, 82, 66], 0.5),
+                typed("Dry Scrub", "bare_oak", [[44, 42, 38], [78, 74, 66], [112, 108, 98], [150, 146, 134]], [96, 82, 66], 0.5),
             ],
             mix_amount: 0.3,
             grass: [64, 60, 48],
@@ -789,9 +890,9 @@ pub fn themes() -> Vec<Theme> {
             name: "Bare Winter",
             note: "Leafless trees and pale birches in winter",
             species: [
-                typed("Winter Oak", "bare_oak", [[40, 34, 28], [74, 64, 52], [112, 98, 80], [150, 136, 112]], [86, 68, 52], 1.0),
-                typed("Winter Birch", "dead_birch", [[40, 34, 28], [74, 64, 52], [112, 98, 80], [150, 136, 112]], [196, 192, 178], 1.0),
-                typed("Bare Brush", "bare_oak", [[40, 34, 28], [74, 64, 52], [112, 98, 80], [150, 136, 112]], [76, 62, 48], 0.5),
+                typed("Winter Oak", "bare_oak", [[44, 42, 38], [78, 74, 66], [112, 108, 98], [150, 146, 134]], [86, 68, 52], 1.0),
+                typed("Winter Birch", "dead_birch", [[44, 42, 38], [78, 74, 66], [112, 108, 98], [150, 146, 134]], [196, 192, 178], 1.0),
+                typed("Bare Brush", "bare_oak", [[44, 42, 38], [78, 74, 66], [112, 108, 98], [150, 146, 134]], [76, 62, 48], 0.5),
             ],
             mix_amount: 0.3,
             grass: [112, 114, 104],
@@ -816,8 +917,8 @@ pub fn themes() -> Vec<Theme> {
             note: "Fat baobabs and flat acacias on dry grass",
             species: [
                 typed("Baobab", "baobab", [[34, 56, 18], [64, 96, 30], [104, 138, 48], [150, 178, 80]], [140, 120, 98], 1.0),
-                themed("Acacia", Form::Acacia, false, [[40, 62, 22], [78, 106, 36], [124, 150, 56], [170, 190, 92]]),
-                themed("Dry Scrub", Form::Bush, false, [[60, 66, 28], [110, 112, 44], [160, 154, 66], [206, 196, 104]]),
+                themed("Acacia", "acer", 0.8, [[40, 62, 22], [78, 106, 36], [124, 150, 56], [170, 190, 92]]),
+                themed("Dry Scrub", "black_oak", 0.5, [[60, 66, 28], [110, 112, 44], [160, 154, 66], [206, 196, 104]]),
             ],
             mix_amount: 0.35,
             grass: [150, 130, 74],
@@ -829,8 +930,8 @@ pub fn themes() -> Vec<Theme> {
             note: "Huge spreading figs over shaded ground",
             species: [
                 typed("Banyan", "banyan", [[10, 36, 16], [22, 70, 30], [42, 110, 48], [80, 152, 76]], [98, 86, 72], 1.1),
-                themed("Fig", Form::Oak, false, [[18, 52, 22], [38, 88, 38], [70, 126, 56], [114, 166, 88]]),
-                themed("Fern Bush", Form::Bush, false, [[20, 60, 26], [44, 100, 40], [80, 140, 60], [128, 180, 90]]),
+                themed("Fig", "black_tupelo", 1.0, [[18, 52, 22], [38, 88, 38], [70, 126, 56], [114, 166, 88]]),
+                themed("Fern Bush", "fan_palm", 0.5, [[20, 60, 26], [44, 100, 40], [80, 140, 60], [128, 180, 90]]),
             ],
             mix_amount: 0.3,
             grass: [54, 92, 44],
@@ -842,8 +943,8 @@ pub fn themes() -> Vec<Theme> {
             note: "Mangroves standing on arching roots in wet ground",
             species: [
                 typed("Stilt Mangrove", "mangrove", [[14, 50, 40], [30, 90, 66], [60, 134, 92], [110, 180, 130]], [96, 76, 58], 0.9),
-                themed("Buttonwood", Form::Oak, false, [[24, 56, 34], [52, 96, 56], [90, 136, 84], [134, 176, 120]]),
-                themed("Salt Shrub", Form::Bush, false, [[30, 60, 50], [66, 100, 80], [110, 140, 112], [156, 184, 150]]),
+                themed("Buttonwood", "black_tupelo", 1.0, [[24, 56, 34], [52, 96, 56], [90, 136, 84], [134, 176, 120]]),
+                themed("Salt Shrub", "black_oak", 0.5, [[30, 60, 50], [66, 100, 80], [110, 140, 112], [156, 184, 150]]),
             ],
             mix_amount: 0.3,
             grass: [70, 84, 60],
@@ -855,8 +956,8 @@ pub fn themes() -> Vec<Theme> {
             note: "Umbrella trees with blue-green blades on dry soil",
             species: [
                 typed("Dragon Blood Tree", "dragon_blood", [[12, 52, 56], [26, 96, 96], [56, 142, 134], [110, 190, 176]], [122, 108, 100], 0.9),
-                themed("Fern Palm", Form::TreeFern, false, [[20, 60, 34], [44, 100, 52], [80, 140, 74], [128, 180, 110]]),
-                themed("Spiky Shrub", Form::Bush, false, [[16, 54, 54], [34, 94, 90], [66, 136, 124], [116, 182, 164]]),
+                themed("Fern Palm", "fan_palm", 1.0, [[20, 60, 34], [44, 100, 52], [80, 140, 74], [128, 180, 110]]),
+                themed("Spiky Shrub", "black_oak", 0.5, [[16, 54, 54], [34, 94, 90], [66, 136, 124], [116, 182, 164]]),
             ],
             mix_amount: 0.25,
             grass: [150, 128, 92],
@@ -868,8 +969,8 @@ pub fn themes() -> Vec<Theme> {
             note: "Joshua trees and sparse scrub on pale sand",
             species: [
                 typed("Joshua Tree", "joshua_tree", [[44, 52, 28], [82, 96, 44], [122, 138, 66], [166, 180, 98]], [132, 106, 80], 0.8),
-                themed("Yucca Scrub", Form::Sage, false, [[54, 62, 34], [96, 108, 56], [140, 152, 82], [184, 194, 118]]),
-                themed("Creosote", Form::Bush, false, [[50, 60, 34], [88, 102, 54], [128, 142, 80], [172, 182, 116]]),
+                themed("Yucca Scrub", "quaking_aspen", 1.0, [[54, 62, 34], [96, 108, 56], [140, 152, 82], [184, 194, 118]]),
+                themed("Creosote", "black_oak", 0.5, [[50, 60, 34], [88, 102, 54], [128, 142, 80], [172, 182, 116]]),
             ],
             mix_amount: 0.15,
             grass: [182, 156, 110],
@@ -881,8 +982,8 @@ pub fn themes() -> Vec<Theme> {
             note: "Silver-green gums with open crowns and dry grass",
             species: [
                 typed("Gum Tree", "eucalyptus", [[30, 50, 44], [60, 90, 76], [104, 136, 114], [156, 180, 156]], [168, 156, 138], 1.2),
-                themed("Wattle", Form::Acacia, false, [[56, 70, 28], [104, 118, 42], [156, 164, 62], [206, 208, 98]]),
-                themed("Bottlebrush", Form::Bush, false, [[34, 56, 40], [66, 96, 64], [108, 138, 92], [156, 180, 128]]),
+                themed("Wattle", "acer", 0.8, [[56, 70, 28], [104, 118, 42], [156, 164, 62], [206, 208, 98]]),
+                themed("Bottlebrush", "black_oak", 0.5, [[34, 56, 40], [66, 96, 64], [108, 138, 92], [156, 180, 128]]),
             ],
             mix_amount: 0.3,
             grass: [120, 118, 70],
@@ -895,7 +996,7 @@ pub fn themes() -> Vec<Theme> {
             species: [
                 typed("Ginkgo", "ginkgo", [[88, 64, 8], [170, 130, 16], [226, 184, 40], [248, 226, 110]], [98, 82, 66], 1.2),
                 typed("Red Maple", "acer", [[60, 14, 10], [130, 30, 18], [196, 62, 26], [236, 122, 52]], [88, 66, 52], 1.0),
-                themed("Gold Shrub", Form::Bush, false, [[84, 60, 10], [150, 112, 20], [208, 164, 44], [240, 210, 100]]),
+                themed("Gold Shrub", "black_oak", 0.5, [[84, 60, 10], [150, 112, 20], [208, 164, 44], [240, 210, 100]]),
             ],
             mix_amount: 0.35,
             grass: [104, 98, 52],
@@ -907,13 +1008,78 @@ pub fn themes() -> Vec<Theme> {
             note: "Bent krummholz and pines over heather",
             species: [
                 typed("Krummholz", "krummholz", [[16, 36, 28], [32, 64, 46], [56, 96, 64], [88, 128, 92]], [78, 66, 54], 0.5),
-                themed("Scots Pine", Form::Pine, true, [[18, 40, 26], [38, 70, 44], [64, 102, 64], [100, 138, 92]]),
-                themed("Heather", Form::Bush, false, [[56, 36, 60], [96, 64, 100], [140, 100, 140], [184, 150, 176]]),
+                themed("Scots Pine", "small_pine", 1.3, [[18, 40, 26], [38, 70, 44], [64, 102, 64], [100, 138, 92]]),
+                themed("Heather", "black_oak", 0.5, [[56, 36, 60], [96, 64, 100], [140, 100, 140], [184, 150, 176]]),
             ],
             mix_amount: 0.25,
             grass: [96, 96, 70],
             accent: [128, 100, 120],
             haze: [76, 80, 64],
+        },
+        Theme {
+            name: "Juniper Highlands",
+            note: "Round, shaggy junipers and pinyon on dry high ground",
+            species: [
+                themed("Juniper", "juniper", 0.8, [[34, 50, 44], [62, 86, 72], [96, 120, 100], [140, 160, 136]]),
+                themed("Pinyon", "small_pine", 1.2, [[30, 46, 34], [56, 80, 56], [88, 112, 80], [130, 150, 112]]),
+                themed("Sagebrush", "black_oak", 0.4, [[70, 80, 62], [110, 122, 98], [150, 160, 130], [190, 198, 166]]),
+            ],
+            mix_amount: 0.3,
+            grass: [138, 124, 92],
+            accent: [160, 140, 100],
+            haze: [100, 92, 66],
+        },
+        Theme {
+            name: "Spruce Spires",
+            note: "Dark, steep spruce with fir between",
+            species: [
+                themed("Spruce", "spruce", 1.5, [[10, 30, 26], [24, 58, 48], [46, 92, 72], [84, 128, 104]]),
+                themed("Fir", "balsam_fir", 1.3, [[14, 34, 28], [30, 62, 50], [52, 94, 74], [88, 128, 104]]),
+                themed("Dwarf Juniper", "juniper", 0.4, [[30, 48, 42], [56, 80, 70], [88, 112, 98], [128, 150, 134]]),
+            ],
+            mix_amount: 0.25,
+            grass: [60, 74, 60],
+            accent: [78, 92, 70],
+            haze: [40, 52, 44],
+        },
+        Theme {
+            name: "Cypress Bayou",
+            note: "Russet bald cypress over dark water and tupelo",
+            species: [
+                themed("Bald Cypress", "bald_cypress", 1.3, [[44, 40, 16], [92, 84, 30], [150, 120, 50], [196, 150, 70]]),
+                themed("Water Tupelo", "black_tupelo", 1.0, [[22, 36, 20], [48, 70, 36], [84, 108, 56], [128, 150, 84]]),
+                themed("Buttonbush", "black_oak", 0.5, [[30, 44, 24], [62, 84, 42], [100, 122, 64], [140, 160, 94]]),
+            ],
+            mix_amount: 0.35,
+            grass: [70, 78, 48],
+            accent: [96, 80, 48],
+            haze: [52, 58, 34],
+        },
+        Theme {
+            name: "Live Oak Hammock",
+            note: "Wide, spreading live oaks with cabbage palms",
+            species: [
+                themed("Live Oak", "live_oak", 1.1, [[22, 34, 22], [44, 66, 42], [78, 104, 70], [124, 148, 106]]),
+                themed("Cabbage Palm", "palm", 1.0, [[30, 52, 28], [60, 92, 44], [96, 132, 66], [140, 170, 100]]),
+                themed("Wax Myrtle", "black_oak", 0.5, [[28, 44, 24], [58, 84, 40], [94, 120, 62], [134, 160, 92]]),
+            ],
+            mix_amount: 0.2,
+            grass: [84, 96, 52],
+            accent: [112, 118, 70],
+            haze: [60, 68, 40],
+        },
+        Theme {
+            name: "Acacia Plains",
+            note: "Flat-topped acacia over golden grass",
+            species: [
+                themed("Umbrella Acacia", "umbrella_acacia", 0.9, [[54, 56, 24], [98, 100, 38], [150, 146, 60], [196, 188, 96]]),
+                themed("Baobab", "baobab", 1.3, [[60, 66, 30], [104, 112, 46], [150, 158, 70], [190, 196, 104]]),
+                themed("Thorn Scrub", "black_oak", 0.4, [[62, 58, 28], [112, 104, 44], [160, 148, 66], [204, 190, 104]]),
+            ],
+            mix_amount: 0.1,
+            grass: [168, 148, 86],
+            accent: [190, 160, 96],
+            haze: [130, 112, 66],
         },
     ]
 }
@@ -950,6 +1116,10 @@ pub struct GenParams {
 
     pub canopy_cover: f32,
     pub canopy_patch_size: f32,
+    /// How strongly trees gather in clusters with open ground between them, 0 (even scatter) to 1.
+    pub clump: f32,
+    /// Typical radius of one cluster of trees, in generated map pixels.
+    pub clump_size: f32,
     /// Depth at which canopy reaches full coverage. Larger means a wider thinning band.
     pub canopy_edge_depth: f32,
     pub crown_min: f32,
@@ -970,6 +1140,13 @@ pub struct GenParams {
     /// Share of the canopy trees that are giant mushrooms the size of trees, 0 for none.
     #[serde(default)]
     pub giant_mushrooms: f32,
+    /// How far crowns lean away from crowded neighbours toward open space, 0 (none) to 1.
+    pub crown_lean: f32,
+    /// Stand age in years, 0 for the forest as drawn. Crowns grow along each tree type's curve up to its real largest size.
+    pub age: f32,
+    /// Set once the age has been worked into the settings, so it is never applied twice.
+    #[serde(skip)]
+    pub age_applied: bool,
     /// Crown shyness: thin gaps where neighbouring crowns of similar height meet.
     pub crown_shyness: bool,
     /// Gap width in map pixels (smaller crowns get proportionally thinner gaps).
@@ -994,8 +1171,6 @@ pub struct GenParams {
     /// Fallback switches: trees from the generator, and trees from the brush.
     pub procedural_trees: bool,
     pub painted_trees: bool,
-    /// Grow every species as its procedural tree type instead of the built-in forms.
-    pub procedural_forms: bool,
     /// Second species mixed into generated canopy in clumps.
     pub mix_species: u8,
     pub mix_amount: f32,
@@ -1038,19 +1213,33 @@ pub struct DepthStyle {
     pub gain: f32,
     /// How different neighbouring crowns look, so clusters follow crown shapes.
     pub crown_var: f32,
+    /// Canopy weave: 0 is off. Crowns of similar height interleave at their edges instead of one dome hiding
+    /// the next, as neighbouring crowns do in aerial imagery.
+    pub weave: f32,
+    /// Ambient occlusion: how much darker the places between and below crowns get, from the shape of the canopy
+    /// surface. 0 is off.
+    pub canopy_ao: f32,
+    /// Light shining through thin leaves on the side of a crown away from the sun, as a glow. 0 is off.
+    pub translucency: f32,
+    /// How much the lumps of a crown (clumps of leaves and branches, not only its overall dome) change how the
+    /// light falls on it. 0 is off.
+    pub lumps: f32,
+    /// Canopy smoothing: 0 is off. Flattens each crown into a lobe of one tone with crisp edges, as in aerial
+    /// photographs. 1 reaches about 60 percent of a crown radius.
+    pub smooth: f32,
 }
 
 impl Default for DepthStyle {
     /// The user's picked settings.
     fn default() -> Self {
-        DepthStyle { crown_tone: 0.1, crown_tone_size: 28.0, crown_shade: 0.0, shade_radius: 14.0, height_var: 1.5, cluster_tone: 1.0, depth_strength: 1.0, gamma: 1.03, gain: 1.2, crown_var: 0.35 }
+        DepthStyle { crown_tone: 0.1, crown_tone_size: 28.0, crown_shade: 0.0, shade_radius: 14.0, height_var: 1.5, cluster_tone: 1.0, depth_strength: 1.0, gamma: 1.03, gain: 1.2, crown_var: 0.35, weave: 0.0, canopy_ao: 0.0, translucency: 0.0, lumps: 0.0, smooth: 0.0 }
     }
 }
 
 impl DepthStyle {
-    /// Tuned so the brightness spread across crowns matches the CG2A files (see research/scripts/spatial_stats.py).
+    /// Tuned so the brightness spread across crowns matches the CG2A files.
     pub fn cg2a_match() -> Self {
-        DepthStyle { crown_tone: 0.5, crown_tone_size: 48.0, crown_shade: 0.35, shade_radius: 14.0, height_var: 0.5, cluster_tone: 1.0, depth_strength: 1.0, gamma: 0.8, gain: 1.2, crown_var: 0.35 }
+        DepthStyle { crown_tone: 0.5, crown_tone_size: 48.0, crown_shade: 0.35, shade_radius: 14.0, height_var: 0.5, cluster_tone: 1.0, depth_strength: 1.0, gamma: 0.8, gain: 1.2, crown_var: 0.35, weave: 0.0, canopy_ao: 0.0, translucency: 0.0, lumps: 0.0, smooth: 0.0 }
     }
 }
 
@@ -1198,6 +1387,8 @@ impl Default for GenParams {
             edge_noise: 0.18,
             canopy_cover: 0.82,
             canopy_patch_size: 160.0,
+            clump: 0.0,
+            clump_size: 70.0,
             canopy_edge_depth: 0.45,
             crown_min: 10.0,
             crown_max: 17.0,
@@ -1210,6 +1401,9 @@ impl Default for GenParams {
             mushrooms: 0.0,
             mushroom_mix: [0.0; 5],
             giant_mushrooms: 0.0,
+            crown_lean: 0.0,
+            age: 0.0,
+            age_applied: false,
             crown_shyness: false,
             shyness_gap: 1.6,
             shyness_giants_only: false,
@@ -1223,7 +1417,6 @@ impl Default for GenParams {
             gap_size: 30.0,
             interior_lone: 0.0,
             procedural_trees: true,
-            procedural_forms: true,
             painted_trees: true,
             mix_species: 2,
             mix_amount: 0.0,
@@ -1327,11 +1520,22 @@ pub struct BackgroundImage {
     pub path: String,
     pub opacity: f32,
     pub visible: bool,
+    /// Map pixels per metre, from calibrating on two points a known distance apart. 0 when not set.
+    #[serde(default)]
+    pub px_per_m: f32,
+    /// Draw a scale bar, and a grid every 100 metres, over the map in the editor.
+    #[serde(default)]
+    pub scale_bar: bool,
+    #[serde(default)]
+    pub grid: bool,
+    /// Keep the picture from being moved or clicked by accident.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 impl Default for BackgroundImage {
     fn default() -> Self {
-        BackgroundImage { path: String::new(), opacity: 1.0, visible: true }
+        BackgroundImage { path: String::new(), opacity: 1.0, visible: true, px_per_m: 0.0, scale_bar: false, grid: false, locked: true }
     }
 }
 
@@ -1357,6 +1561,12 @@ pub struct Project {
 }
 
 impl Project {
+    /// The zones in the order they are painted into the shape mask: forests first, then every clearing, so a
+    /// clearing or a no-trees mask holds whenever it was drawn.
+    pub fn shapes_clearings_last(&self) -> impl Iterator<Item = &Shape> {
+        self.shapes.iter().filter(|s| s.op == ShapeOp::Add).chain(self.shapes.iter().filter(|s| s.op != ShapeOp::Add))
+    }
+
     /// Make sure the mushroom species exist, adding any that a saved project lacks.
     pub fn ensure_mushroom_species(&mut self) {
         for m in mushroom_species() {
@@ -1382,11 +1592,14 @@ impl Project {
         let g = &self.gen;
         let kept: Vec<Option<String>> = [g.main_species, g.mix_species, g.shrub_species]
             .iter()
-            .map(|&i| self.species.get(i as usize).and_then(|s| s.tree_type(false).map(str::to_string)))
+            .map(|&i| self.species.get(i as usize).and_then(|s| if s.procedural { s.tree_type().map(str::to_string) } else { None }))
             .collect();
         let mut idx = [0u8; 3];
         for (k, sp) in t.species.iter().enumerate() {
             let mut sp = sp.clone();
+            if !is_satellite_theme(t.name) {
+                natural_ramp(t.name, &mut sp);
+            }
             if let Some(ty) = &kept[k] {
                 sp.procedural = true;
                 sp.preset = ty.clone();
@@ -1418,6 +1631,14 @@ impl Project {
         g.grass_color = t.grass.map(|v| v as f32 / 255.0);
         g.grass_accent = t.accent.map(|v| v as f32 / 255.0);
         g.haze_color = t.haze.map(|v| v as f32 / 255.0);
+        // a satellite theme also carries the structure and look of the stand it was measured from
+        if let Some(over) = theme_settings(t.name).or_else(|| natural_look(t.name)) {
+            let mut cur = serde_json::to_value(&*g).unwrap_or_default();
+            crate::groups::merge_value(&mut cur, &over);
+            if let Ok(new) = serde_json::from_value(cur) {
+                *g = new;
+            }
+        }
     }
 }
 

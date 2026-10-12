@@ -11,7 +11,10 @@ const TILE: u32 = 4096;
 /// A decoded picture cut into tiles, each with where it sits as fractions of the whole: [x0, y0, x1, y1].
 pub(super) type Tiles = Vec<(egui::ColorImage, [f32; 4])>;
 
-fn load_tiles(path: &str) -> Result<Tiles, String> {
+/// The longest side of the copy the wand reads.
+const WAND_SIDE: u32 = 1536;
+
+fn load_tiles(path: &str) -> Result<(Tiles, BgPixels), String> {
     let img = image::open(path).map_err(|e| e.to_string())?;
     let (w, h) = (img.width(), img.height());
     let k = (MAX_SIDE as f32 / w.max(h) as f32).min(1.0);
@@ -23,6 +26,10 @@ fn load_tiles(path: &str) -> Result<Tiles, String> {
     };
     drop(img);
     let (w, h) = (rgba.width(), rgba.height());
+    // a smaller copy kept in memory for the wand
+    let ks = (WAND_SIDE as f32 / w.max(h) as f32).min(1.0);
+    let small = if ks < 1.0 { image::imageops::resize(&rgba, ((w as f32 * ks) as u32).max(1), ((h as f32 * ks) as u32).max(1), image::imageops::FilterType::Triangle) } else { rgba.clone() };
+    let pixels = BgPixels { w: small.width() as usize, h: small.height() as usize, rgba: small.into_raw() };
     let mut out = Vec::new();
     let mut y = 0;
     while y < h {
@@ -37,7 +44,7 @@ fn load_tiles(path: &str) -> Result<Tiles, String> {
         }
         y += th;
     }
-    Ok(out)
+    Ok((out, pixels))
 }
 
 impl TreeApp {
@@ -52,6 +59,7 @@ impl TreeApp {
         if want != self.bg_loaded {
             self.bg_loaded = want.clone();
             self.bg_tiles.clear();
+            self.bg_pixels = None;
             self.bg_rx = None;
             if let Some(path) = want {
                 let (tx, rx) = channel();
@@ -68,7 +76,8 @@ impl TreeApp {
             if let Ok(r) = rx.try_recv() {
                 self.bg_rx = None;
                 match r {
-                    Ok(tiles) => {
+                    Ok((tiles, pixels)) => {
+                        self.bg_pixels = Some(pixels);
                         self.bg_tiles = tiles.into_iter().map(|(ci, uv)| (ctx.load_texture("background", ci, egui::TextureOptions::LINEAR), uv)).collect();
                     }
                     Err(e) => self.status = format!("Could not load the background image: {e}"),

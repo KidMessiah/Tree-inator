@@ -12,7 +12,7 @@ pub enum Job {
     /// Render only the part of the map on screen: `scale` render pixels per map pixel, `view` the map
     /// rectangle (x0, y0, x1, y1) that has to come out exact.
     View { project: Project, scale: f32, view: [f32; 4], id: u64 },
-    Export { project: Project, scale: f32, path: PathBuf, variants: Variants },
+    Export { project: Project, scale: f32, path: PathBuf, variants: Variants, format: forest_core::render::ExportFormat },
 }
 
 #[derive(Clone, Copy)]
@@ -127,11 +127,11 @@ pub fn spawn(rx: Receiver<Job>, tx: Sender<Msg>, latest: Arc<AtomicU64>, ctx: ef
                             send(Msg::GpuView { layers, extra: all, id, ms: t.elapsed().as_millis(), scale, origin: [x0, y0], core: view });
                         }
                     }
-                    Job::Export { project, scale, path, variants } => {
+                    Job::Export { project, scale, path, variants, format } => {
                         send(Msg::Status("Exporting...".into()));
                         // give the preview's kept work back while the export runs
                         caches.iter_mut().for_each(|c| c.clear());
-                        let res = export(gpu.as_deref(), &project, scale, &path, variants, &mut |k| send(Msg::Status(format!("Exporting {:.0}%", k * 100.0))));
+                        let res = export(gpu.as_deref(), &project, scale, &path, variants, format, &mut |k| send(Msg::Status(format!("Exporting {:.0}%", k * 100.0))));
                         send(Msg::Exported(res));
                     }
                 }
@@ -141,23 +141,25 @@ pub fn spawn(rx: Receiver<Job>, tx: Sender<Msg>, latest: Arc<AtomicU64>, ctx: ef
 }
 
 /// Write the chosen variants strip by strip, so even very large maps fit in memory.
-fn export(gpu: Option<&forest_core::gpu::Gpu>, p: &Project, scale: f32, path: &PathBuf, v: Variants, progress: &mut dyn FnMut(f32)) -> Result<Vec<PathBuf>, String> {
+fn export(gpu: Option<&forest_core::gpu::Gpu>, p: &Project, scale: f32, path: &PathBuf, v: Variants, format: forest_core::render::ExportFormat, progress: &mut dyn FnMut(f32)) -> Result<Vec<PathBuf>, String> {
     let stem = path.with_extension("");
     let stem = stem.to_string_lossy();
     let base = ComposeOptions { shadows: p.light.shadows, shadow_only: false, background: None, premultiplied: false };
+    // a tile export names a folder, the other formats a file with their own extension
+    let ext = format.extension().unwrap_or("png");
     let mut outputs = Vec::new();
     if v.main {
-        outputs.push((PathBuf::from(format!("{stem}.png")), base));
+        outputs.push((PathBuf::from(format!("{stem}.{ext}")), base));
     }
     if v.no_shadow {
-        outputs.push((PathBuf::from(format!("{stem}_noshadow.png")), ComposeOptions { shadows: false, ..base }));
+        outputs.push((PathBuf::from(format!("{stem}_noshadow.{ext}")), ComposeOptions { shadows: false, ..base }));
     }
     if v.shadow_only {
-        outputs.push((PathBuf::from(format!("{stem}_shadow.png")), ComposeOptions { shadows: true, shadow_only: true, ..base }));
+        outputs.push((PathBuf::from(format!("{stem}_shadow.{ext}")), ComposeOptions { shadows: true, shadow_only: true, ..base }));
     }
     match gpu {
-        Some(g) => export_strips_gpu(g, p, scale, &outputs, &|| false, progress)?,
-        None => export_strips(p, scale, &outputs, &|| false, progress)?,
+        Some(g) => forest_core::render::export_strips_gpu_as(g, p, scale, &outputs, format, &|| false, progress)?,
+        None => forest_core::render::export_strips_as(p, scale, &outputs, format, &|| false, progress)?,
     }
     Ok(outputs.into_iter().map(|o| o.0).collect())
 }

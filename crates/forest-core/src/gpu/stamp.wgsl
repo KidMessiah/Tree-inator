@@ -91,8 +91,21 @@ fn stamp_hit(inst: u32, p: u32) -> Hit {
     return h;
 }
 
-fn stamp_z(inst: u32, si: u32) -> f32 {
-    return f0[si] * bitcast<f32>(u2[inst * 16u + 5u]);
+// i is the destination pixel; the weave jitter hashes its map-wide coordinates, as the CPU does
+fn stamp_z(inst: u32, si: u32, i: u32) -> f32 {
+    let base = inst * 16u;
+    var z = f0[si] * bitcast<f32>(u2[base + 5u]);
+    let wv = bitcast<f32>(u2[base + 15u]);
+    if wv > 0.0 {
+        let top = bitcast<f32>(u2[base + 14u]);
+        let b = 0.8 * wv;
+        let j = 0.35 * wv;
+        let gx = i32(i % p_w()) + i32(p_ox());
+        let gy = i32(i / p_w()) + i32(p_oy());
+        let species = (u2[base + 6u] >> 8u) & 0xffu;
+        z = top * (b + (1.0 - b) * (z / max(top, 1e-3))) + top * j * (hash(gx, gy, species + 1717u) - 0.5);
+    }
+    return z;
 }
 
 @compute @workgroup_size(256)
@@ -105,7 +118,7 @@ fn k_stamp_z(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nwg
     for (var p = li; p < n * n; p += 256u) {
         let h = stamp_hit(inst, p);
         if h.ok {
-            let z = stamp_z(inst, h.si);
+            let z = stamp_z(inst, h.si, h.i);
             if z > 0.0 {
                 atomicMax(&u5[h.i], bitcast<u32>(z));
             }
@@ -124,7 +137,7 @@ fn k_stamp_win(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) n
     for (var p = li; p < n * n; p += 256u) {
         let h = stamp_hit(inst, p);
         if h.ok {
-            let z = stamp_z(inst, h.si);
+            let z = stamp_z(inst, h.si, h.i);
             if z > 0.0 && bitcast<u32>(z) == atomicLoad(&u5[h.i]) {
                 atomicMax(&u6[h.i], 0xffffffffu - inst);
             }
@@ -145,7 +158,7 @@ fn k_stamp_attr(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) 
     for (var p = li; p < n * n; p += 256u) {
         let h = stamp_hit(inst, p);
         if h.ok {
-            let z = stamp_z(inst, h.si);
+            let z = stamp_z(inst, h.si, h.i);
             if z > 0.0 && atomicLoad(&u6[h.i]) == 0xffffffffu - inst {
                 let a = u0[h.si];
                 var nx = bitcast<i32>(a << 24u) >> 24u;

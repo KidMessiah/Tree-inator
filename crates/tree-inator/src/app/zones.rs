@@ -93,105 +93,8 @@ impl TreeApp {
     }
 
     /// The rows of one group level: the groups on top, then the zones, each newest first.
-    fn tree_rows(&mut self, ui: &mut egui::Ui, parent: Option<u32>, depth: usize) {
-        let ids: Vec<u32> = self.project.groups.iter().filter(|n| n.parent == parent).map(|n| n.id).rev().collect();
-        for id in ids {
-            let Some(n) = self.project.group(id).cloned() else { continue };
-            ui.horizontal(|ui| {
-                ui.add_space(depth as f32 * 14.0);
-                if ui.small_button(if n.collapsed { "+" } else { "-" }).on_hover_text("Open or close the group").clicked() {
-                    if let Some(m) = self.project.group_mut(id) {
-                        m.collapsed = !m.collapsed;
-                    }
-                }
-                let mut vis = n.visible;
-                if ui.checkbox(&mut vis, "").on_hover_text("Show or hide the group and everything in it").changed() {
-                    if let Some(m) = self.project.group_mut(id) {
-                        m.visible = vis;
-                    }
-                }
-                let count = match self.project.zones_under(id) {
-                    1 => "1 zone".to_string(),
-                    k => format!("{k} zones"),
-                };
-                let text = format!("[{}] ({count})", if n.name.is_empty() { "Group" } else { &n.name });
-                if ui.selectable_label(self.group_sel == Some(id), egui::RichText::new(text).strong()).clicked() {
-                    self.group_sel = if self.group_sel == Some(id) { None } else { Some(id) };
-                    if self.group_sel.is_some() {
-                        self.zone_sel = None;
-                        self.prev_zone_sel = None;
-                    }
-                }
-            });
-            if !n.collapsed {
-                self.tree_rows(ui, Some(id), depth + 1);
-            }
-        }
-        // the zones of this level, newest on top
-        let zones: Vec<usize> = (0..self.project.shapes.len()).filter(|&i| self.project.zone_group(&self.project.shapes[i]) == parent).rev().collect();
-        for i in zones {
-            ui.horizontal(|ui| {
-                ui.add_space(depth as f32 * 14.0 + 18.0);
-                let z = &self.project.shapes[i];
-                let mut vis = z.visible;
-                if ui.checkbox(&mut vis, "").on_hover_text("Show or hide this zone").changed() {
-                    self.push_undo();
-                    self.project.shapes[i].visible = vis;
-                }
-                let (sign, col) = match self.project.shapes[i].op {
-                    ShapeOp::Add => ("+", Color32::from_rgb(120, 220, 120)),
-                    ShapeOp::Subtract => ("-", Color32::from_rgb(255, 120, 110)),
-                };
-                ui.label(egui::RichText::new(sign).color(col).strong());
-                let name = self.zone_name(i);
-                if ui.selectable_label(self.zone_sel == Some(i), name).clicked() {
-                    self.zone_sel = if self.zone_sel == Some(i) { None } else { Some(i) };
-                    if self.zone_sel.is_some() {
-                        self.group_sel = None;
-                    }
-                }
-            });
-        }
-    }
-
-    /// The zones and the groups they are in, as a tree, in the left rail. New zones go into the group picked.
-    pub(super) fn zones_ui(&mut self, ui: &mut egui::Ui) {
-        if self.zone_sel.is_some_and(|i| i >= self.project.shapes.len()) {
-            self.zone_sel = None;
-        }
-        if self.group_sel.is_some_and(|id| self.project.group(id).is_none()) {
-            self.group_sel = None;
-        }
-        ui.label(egui::RichText::new("ZONES").small().weak());
-        if self.project.shapes.is_empty() && self.project.groups.is_empty() {
-            ui.small("Draw a forest with the lasso or polygon. Each shape becomes a zone. Put zones in a group to give them settings of their own.");
-        }
-        self.tree_rows(ui, None, 0);
-        let place = self.placement_group();
-        ui.horizontal_wrapped(|ui| {
-            let hover = match place {
-                Some(g) => format!("An empty group inside {}", self.project.path_name(g)),
-                None => "An empty group".to_string(),
-            };
-            if ui.small_button("New group").on_hover_text(hover).clicked() {
-                self.push_undo();
-                self.group_sel = Some(self.project.add_group(place));
-                self.zone_sel = None;
-                self.prev_zone_sel = None;
-            }
-            if let Some(g) = place {
-                ui.small(format!("New zones go in {}", self.project.path_name(g)));
-            }
-        });
-        if let Some(id) = self.group_sel {
-            self.group_actions(ui, id);
-        }
-        let Some(i) = self.zone_sel else {
-            if self.group_sel.is_none() && !self.project.shapes.is_empty() {
-                ui.small("Pick a zone or a group to edit it.");
-            }
-            return;
-        };
+    /// What can be done with the zone that is picked.
+    pub(super) fn zone_actions(&mut self, ui: &mut egui::Ui, i: usize) {
         ui.separator();
         let n = self.project.shapes.len();
         let mut name = self.project.shapes[i].name.clone();
@@ -242,7 +145,7 @@ impl TreeApp {
             }
         });
         if ui.small_button("Edit points").on_hover_text("Switch to the zone editing tool").clicked() {
-            self.tool = Tool::Zones;
+            self.tool = Tool::Select;
         }
         if ui.small_button("Clear all zones").clicked() {
             self.push_undo();
@@ -252,7 +155,7 @@ impl TreeApp {
     }
 
     /// What can be done with the group that is picked.
-    fn group_actions(&mut self, ui: &mut egui::Ui, id: u32) {
+    pub(super) fn group_actions(&mut self, ui: &mut egui::Ui, id: u32) {
         let Some(n) = self.project.group(id).cloned() else { return };
         ui.separator();
         let mut name = n.name.clone();
@@ -364,7 +267,10 @@ impl TreeApp {
         }
         if resp.drag_started_by(PointerButton::Primary) {
             let sel_inside = self.zone_sel.is_some_and(|i| inside(&self.zone_screen(i, origin), pointer));
-            if let (Some(_), Some(k)) = (self.zone_sel, over_point) {
+            let locked = self.zone_sel.is_some_and(|i| self.zone_locked(i));
+            if locked && (over_point.is_some() || sel_inside) {
+                self.status = "That zone is locked. Unlock it in the zone list to edit it.".into();
+            } else if let (Some(_), Some(k)) = (self.zone_sel, over_point) {
                 self.push_undo();
                 self.zone_drag = Some(ZoneDrag::Point(k));
             } else if sel_inside {
@@ -377,9 +283,14 @@ impl TreeApp {
                 let delta = resp.drag_delta() / self.zoom;
                 match d {
                     ZoneDrag::Point(k) => {
-                        if let Some(p) = self.project.shapes[i].points.get_mut(k) {
-                            p[0] += delta.x;
-                            p[1] += delta.y;
+                        let moved = self.project.shapes[i].points.get(k).map(|p| [p[0] + delta.x, p[1] + delta.y]);
+                        if let Some(mut m) = moved {
+                            if self.snap {
+                                if let Some(sp) = self.snap_point(m, Some(i)) {
+                                    m = sp;
+                                }
+                            }
+                            self.project.shapes[i].points[k] = m;
                         }
                     }
                     ZoneDrag::Move => {
@@ -403,12 +314,36 @@ impl TreeApp {
                     break;
                 }
             }
-            self.zone_sel = hit;
+            let multi = ui.input(|i| i.modifiers.command || i.modifiers.shift);
+            match (hit, multi) {
+                (Some(h), true) if self.zone_sel.is_some() => {
+                    if self.zone_sel == Some(h) {
+                        self.zone_sel = self.zone_multi.pop();
+                    } else if let Some(k) = self.zone_multi.iter().position(|&z| z == h) {
+                        self.zone_multi.remove(k);
+                    } else {
+                        self.zone_multi.push(h);
+                    }
+                }
+                (h, _) => {
+                    self.zone_sel = h;
+                    self.zone_multi.clear();
+                }
+            }
+            if hit.is_some() {
+                self.group_sel = None;
+            }
         }
         if self.zone_sel.is_some() && ui.input(|i| i.key_pressed(Key::Delete)) {
-            if let Some(i) = self.zone_sel.take() {
+            let mut gone: Vec<usize> = self.selected_zones().into_iter().filter(|&i| !self.zone_locked(i)).collect();
+            if !gone.is_empty() {
                 self.push_undo();
-                self.project.shapes.remove(i);
+                gone.sort_unstable_by(|a, b| b.cmp(a));
+                for i in gone {
+                    self.project.shapes.remove(i);
+                }
+                self.zone_sel = None;
+                self.zone_multi.clear();
             }
         }
     }
@@ -416,25 +351,41 @@ impl TreeApp {
     /// Outlines of every zone, with the selected one filled and its corners shown.
     pub(super) fn draw_zones(&self, painter: &egui::Painter, origin: Pos2) {
         for (i, s) in self.project.shapes.iter().enumerate() {
-            let sel = self.zone_sel == Some(i);
+            let sel = self.selected_zones().contains(&i);
             if !self.show_outlines && !sel {
                 continue;
             }
             let pts = self.zone_screen(i, origin);
-            let (r, g, b) = match s.op {
-                ShapeOp::Add => (120, 255, 120),
-                ShapeOp::Subtract => (255, 110, 110),
+            let (r, g, b) = if sel {
+                (120, 210, 255)
+            } else if s.mask {
+                (220, 90, 90)
+            } else {
+                match s.op {
+                    ShapeOp::Add => (120, 255, 120),
+                    ShapeOp::Subtract => (255, 110, 110),
+                }
             };
             let alpha = if !s.visible { 60 } else if sel { 255 } else { 140 };
             let width = if sel { 2.0 } else { 1.0 };
             painter.add(egui::Shape::closed_line(pts.clone(), Stroke::new(width, Color32::from_rgba_unmultiplied(r, g, b, alpha))));
-            if sel && self.tool == Tool::Zones {
+            if self.zone_sel == Some(i) && self.tool == Tool::Select && !self.zone_locked(i) && pts.len() <= 120 {
                 for q in &pts {
                     painter.rect_filled(Rect::from_center_size(*q, Vec2::splat(HANDLE * 2.0)), 2.0, Color32::WHITE);
                     painter.rect_stroke(Rect::from_center_size(*q, Vec2::splat(HANDLE * 2.0)), 2.0, Stroke::new(1.5, Color32::from_rgb(r, g, b)), egui::StrokeKind::Inside);
                 }
             }
-            if sel {
+            if s.mask {
+                // hatching, so a no-trees mask reads at a glance
+                let (mnx, mny, mxx, mxy) = (pts.iter().map(|p| p.x).fold(f32::MAX, f32::min), pts.iter().map(|p| p.y).fold(f32::MAX, f32::min), pts.iter().map(|p| p.x).fold(f32::MIN, f32::max), pts.iter().map(|p| p.y).fold(f32::MIN, f32::max));
+                let clip = painter.with_clip_rect(Rect::from_min_max(Pos2::new(mnx, mny), Pos2::new(mxx, mxy)).intersect(painter.clip_rect()));
+                let mut x = mnx - (mxy - mny);
+                while x < mxx {
+                    clip.line_segment([Pos2::new(x, mxy), Pos2::new(x + (mxy - mny), mny)], Stroke::new(0.8, Color32::from_rgba_unmultiplied(220, 90, 90, 90)));
+                    x += 9.0;
+                }
+            }
+            if self.zone_sel == Some(i) {
                 let c = pts.iter().fold(Vec2::ZERO, |a, p| a + p.to_vec2()) / pts.len().max(1) as f32;
                 painter.text(Pos2::new(c.x, c.y), egui::Align2::CENTER_CENTER, self.zone_name(i), egui::FontId::proportional(13.0), Color32::WHITE);
             }

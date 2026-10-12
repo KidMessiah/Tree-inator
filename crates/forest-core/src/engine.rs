@@ -4,7 +4,7 @@ use crate::field::Field;
 use crate::noise::{fbm, fbm_warped, hash01, smoothstep as ss, value};
 use crate::params::*;
 use crate::rng::Rng;
-use crate::wp::{sprite_for, SpriteSpec};
+use std::collections::HashMap;
 use rayon::prelude::*;
 
 #[path = "shy.rs"]
@@ -212,11 +212,12 @@ impl Tree {
     }
 }
 
-/// Give generated trees the per-tree seeds they had before records existed,
-/// so filtering or mixing never changes the look of the remaining trees.
+/// A tree's seed comes from where it stands, so adding, removing or filtering other trees never changes how it looks,
+/// and a tree that stays where it is keeps its look when the zone around it is edited.
 fn assign_seeds(trees: &mut [Tree], base: u64) {
-    for (n, t) in trees.iter_mut().enumerate() {
-        t.seed = base ^ (n as u64).wrapping_mul(0x2545_F491_4F6C_DD1D);
+    for t in trees.iter_mut() {
+        let q = ((t.x * 16.0).round() as i64 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((t.y * 16.0).round() as i64 as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+        t.seed = Rng::new(base ^ q).next_u64();
     }
 }
 
@@ -279,13 +280,16 @@ impl Stamp {
 /// One tree ready to draw: its sprite, where the sprite's top left corner lands in render pixels, how it is
 /// turned, and how much its height is scaled so its top matches the tree's height.
 pub(crate) struct SpriteInstance {
-    pub(crate) spr: std::sync::Arc<crate::wp::Sprite>,
+    pub(crate) spr: std::sync::Arc<crate::sprite::Sprite>,
     pub(crate) x0: i32,
     pub(crate) y0: i32,
     /// Quarter turns, then a mirror.
     pub(crate) k: u32,
     pub(crate) flip: bool,
     pub(crate) zs: f32,
+    /// Height of the crown top in render pixels, and the canopy weave it is drawn with.
+    pub(crate) top: f32,
+    pub(crate) weave: f32,
     pub(crate) tone: i16,
     pub(crate) species: u8,
     pub(crate) painted: bool,
@@ -299,28 +303,14 @@ fn size_bucket(r_px: f32) -> f32 {
 }
 
 /// The sprite and placement for a tree, or None when it is under about a pixel across.
-fn sprite_instance(t: &Tree, sp: &Species, s: f32) -> Option<SpriteInstance> {
+fn sprite_instance(t: &Tree, sp: &Species, s: f32, weave: f32) -> Option<SpriteInstance> {
     let r_px = t.r * s;
     if r_px < 1.0 {
         return None;
     }
     let bucket = size_bucket(r_px);
-    let spec = SpriteSpec {
-        form: sp.form,
-        branchiness: sp.branchiness,
-        clumpiness: sp.clumpiness,
-        leaf_cover: sp.leaf_cover,
-        // Leaves never outgrow the crown, so tiny trees still read as a small bush.
-        leaf_px: (sp.leaf_size * s).min(r_px * 0.5),
-        leaf_elong: sp.leaf_shape,
-        along: sp.needles,
-        bare: sp.bare,
-    };
-    let preset = sp.tree_type(false).and_then(|ty| crate::treegen_sprite::sprite_for_radius(ty, (t.seed % crate::treegen_sprite::VARIANTS as u64) as u32, bucket, sp.canopy_fill));
-    let spr = match preset {
-        Some(b) => b,
-        None => sprite_for(&spec, bucket, (t.seed % 10) as u32),
-    };
+    let preset = sp.tree_type().and_then(|ty| crate::treegen_sprite::sprite_for_radius(ty, (t.seed % crate::treegen_sprite::VARIANTS as u64) as u32, bucket, sp.canopy_fill));
+    let spr = preset?;
     let orient = ((t.seed >> 8) % 8) as u32;
     let n = spr.size as i32;
     let zs = t.h * s * sp.height / spr.zmax.max(1e-3);
@@ -330,6 +320,8 @@ fn sprite_instance(t: &Tree, sp: &Species, s: f32) -> Option<SpriteInstance> {
         k: orient % 4,
         flip: orient >= 4,
         zs,
+        top: t.h * s * sp.height,
+        weave,
         tone: (t.tone * TONE_STEP).round().clamp(-32767.0, 32767.0) as i16,
         species: t.species,
         painted: t.painted,
@@ -338,8 +330,17 @@ fn sprite_instance(t: &Tree, sp: &Species, s: f32) -> Option<SpriteInstance> {
     })
 }
 
+/// Canopy weave: lift a crown's surface toward its top, so its edge starts high instead of at the ground, and
+/// add a per-pixel jitter. Crowns of similar height then interleave at their edges instead of one dome hiding
+/// the next. `w` is 0 (off) to 1; `gx`, `gy` are map-wide pixel coordinates so tiles and strips agree.
+pub(crate) fn weave_z(z: f32, top: f32, w: f32, gx: i32, gy: i32, species: u8) -> f32 {
+    let base = 0.8 * w;
+    let jitter = 0.35 * w;
+    top * (base + (1.0 - base) * (z / top.max(1e-3))) + top * jitter * (hash01(gx, gy, species as u32 + 1717) - 0.5)
+}
+
 /// Stamp one generated sprite tree.
-fn stamp_sprite(st: &mut Stamp, t: &Tree, sp: &Species, region: Region, s: f32, fac: Option<&Factors>) {
+fn stamp_sprite(st: &mut Stamp, t: &Tree, sp: &Species, region: Region, s: f32, weave: f32, fac: Option<&Factors>) {
     let r_px = t.r * s;
     // Skip trees that cannot reach this region, before fetching a sprite.
     let reach = 1.6 * r_px + 6.0;
@@ -347,7 +348,7 @@ fn stamp_sprite(st: &mut Stamp, t: &Tree, sp: &Species, region: Region, s: f32, 
     if cx + reach < 0.0 || cy + reach < 0.0 || cx - reach > region.w as f32 || cy - reach > region.h as f32 {
         return;
     }
-    let Some(inst) = sprite_instance(t, sp, s) else { return };
+    let Some(inst) = sprite_instance(t, sp, s, weave) else { return };
     let (w, h) = (region.w, region.h);
     let spr = &inst.spr;
     let (k, flip, zs) = (inst.k, inst.flip, inst.zs);
@@ -389,7 +390,10 @@ fn stamp_sprite(st: &mut Stamp, t: &Tree, sp: &Species, region: Region, s: f32, 
                 continue;
             }
             let i = py as usize * w + px as usize;
-            let z = spr.z[si] * zs;
+            let mut z = spr.z[si] * zs;
+            if inst.weave > 0.0 {
+                z = weave_z(z, inst.top, inst.weave, px + region.x0 as i32, py + region.y0 as i32, inst.species);
+            }
             if z > st.height[i] {
                 st.height[i] = z;
                 st.tone[i] = inst.tone;
@@ -461,36 +465,43 @@ pub(crate) fn fill_polygon(mask: &mut Field, pts: &[[f32; 2]], value: f32) {
     }
 }
 
-/// Dart throwing with minimum spacing, in map coordinates.
+/// The random numbers of dart number `k` of a layer. Every dart draws all of its numbers up front, whether or not it lands,
+/// so changing the area where trees may grow never changes where darts fall elsewhere.
+fn dart(seed: u64, k: usize) -> Rng {
+    Rng::new(seed ^ (k as u64 + 1).wrapping_mul(0xD1B5_4A32_D192_ED03))
+}
+
+/// Dart throwing with minimum spacing, in map coordinates. Each point is (x, y, radius, tone).
 fn scatter(
-    rng: &mut Rng,
+    seed: u64,
     map_w: f32,
     map_h: f32,
     darts: usize,
     rmin: f32,
     rmax: f32,
     mind: f32,
-    mut accept: impl FnMut(f32, f32, &mut Rng) -> f32,
-) -> Vec<(f32, f32, f32)> {
+    mut accept: impl FnMut(f32, f32) -> f32,
+) -> Vec<(f32, f32, f32, f32)> {
     let cell = (mind * 2.0 * rmax).max(1.0);
     let gw = (map_w / cell).ceil() as usize + 1;
     let gh = (map_h / cell).ceil() as usize + 1;
     let mut grid: Vec<Vec<u32>> = vec![Vec::new(); gw * gh];
-    let mut pts: Vec<(f32, f32, f32)> = Vec::new();
-    for _ in 0..darts {
-        let x = rng.f32() * map_w;
-        let y = rng.f32() * map_h;
-        let p = accept(x, y, rng);
-        if p <= 0.0 || rng.f32() > p {
+    let mut pts: Vec<(f32, f32, f32, f32)> = Vec::new();
+    for k in 0..darts {
+        let mut rng = dart(seed, k);
+        let (x, y, u) = (rng.f32() * map_w, rng.f32() * map_h, rng.f32());
+        let r = rng.range(rmin, rmax);
+        let tone = rng.normal(0.0, 0.1);
+        let p = accept(x, y);
+        if p <= 0.0 || u > p {
             continue;
         }
-        let r = rng.range(rmin, rmax);
         let (gx, gy) = ((x / cell) as usize, (y / cell) as usize);
         let mut ok = true;
         'outer: for yy in gy.saturating_sub(1)..(gy + 2).min(gh) {
             for xx in gx.saturating_sub(1)..(gx + 2).min(gw) {
                 for &i in &grid[yy * gw + xx] {
-                    let (px, py, pr) = pts[i as usize];
+                    let (px, py, pr, _) = pts[i as usize];
                     let d = mind * (r + pr);
                     if (x - px) * (x - px) + (y - py) * (y - py) < d * d {
                         ok = false;
@@ -501,10 +512,44 @@ fn scatter(
         }
         if ok {
             grid[gy * gw + gx].push(pts.len() as u32);
-            pts.push((x, y, r));
+            pts.push((x, y, r, tone));
         }
     }
     pts
+}
+
+/// Where trees gather: parent points spread over the map, and a soft bump of likelihood around each (a Thomas cluster
+/// process). Returns a function from a map position to how likely a tree is to be allowed there, 0 to 1, which is 1 on
+/// the clusters and falls away between them as `strength` grows.
+fn clump_field(seed: u64, map_w: f32, map_h: f32, size: f32, strength: f32) -> impl Fn(f32, f32) -> f32 {
+    let sigma = size.max(8.0);
+    let spacing = 2.4 * sigma;
+    let n = ((map_w * map_h) / (spacing * spacing)).ceil().max(1.0) as usize;
+    let cell = 3.0 * sigma;
+    let (gw, gh) = ((map_w / cell).ceil() as usize + 2, (map_h / cell).ceil() as usize + 2);
+    let mut grid: Vec<Vec<(f32, f32, f32)>> = vec![Vec::new(); gw * gh];
+    for k in 0..n {
+        let mut rng = dart(seed ^ 0x5151, k);
+        let (x, y) = (rng.f32() * map_w, rng.f32() * map_h);
+        // each cluster has its own weight, so some are bigger than others
+        grid[((y / cell) as usize).min(gh - 1) * gw + ((x / cell) as usize).min(gw - 1)].push((x, y, 0.6 + 0.8 * rng.f32()));
+    }
+    // average of the bumps over the map, so the overall density stays about where it was
+    let mean = n as f32 * 2.0 * std::f32::consts::PI * sigma * sigma / (map_w * map_h);
+    move |x, y| {
+        let (cx, cy) = (((x / cell) as usize).min(gw - 1), ((y / cell) as usize).min(gh - 1));
+        let mut sum = 0.0;
+        for yy in cy.saturating_sub(1)..(cy + 2).min(gh) {
+            for xx in cx.saturating_sub(1)..(cx + 2).min(gw) {
+                for &(px, py, w) in &grid[yy * gw + xx] {
+                    let d2 = (x - px).powi(2) + (y - py).powi(2);
+                    sum += w * (-d2 / (2.0 * sigma * sigma)).exp();
+                }
+            }
+        }
+        // darts fill every place that is likely at all, so the likelihood has to fall off steeply to leave real gaps
+        (((1.0 - strength) + strength * sum / mean.max(1e-6)).clamp(0.0, 1.0)).powf(1.0 + 6.0 * strength)
+    }
 }
 
 /// Stamp every tree of a layer as a generated sprite (render pixels).
@@ -519,7 +564,7 @@ fn stamp_trees(trees: &[Tree], species: &[Species], region: Region, s: f32, dept
         if f.map_or(false, hidden) {
             continue;
         }
-        stamp_sprite(&mut st, &tv, sp, region, s, f.filter(|f| f.iter().any(|v| *v < 255)));
+        stamp_sprite(&mut st, &tv, sp, region, s, depth.weave, f.filter(|f| f.iter().any(|v| *v < 255)));
     }
     st
 }
@@ -622,6 +667,9 @@ struct SpritePixel<'a> {
     b9: f32,
     bx: f32,
     by: f32,
+    /// Slope of the crown surface at the scale of a few pixels, for the lumps within a crown.
+    lx: f32,
+    ly: f32,
     rel: f32,
     ramp: &'a [[f32; 3]; 4],
     bark: [f32; 3],
@@ -660,9 +708,14 @@ fn depth_mod(ds: &DepthStyle, rel: f32, nx: f32, ny: f32, sd: u32) -> (f32, f32)
 
 /// Colour of one generated-sprite pixel, lit from the sprite's own surface direction.
 fn sprite_color(p: SpritePixel, ls: &LeafStyle, ds: &DepthStyle, lv: [f32; 3], flat: bool, s: f32, inv: f32, sd: u32) -> [f32; 3] {
-    let n = (p.nx * p.nx + p.ny * p.ny + 1.0).sqrt();
-    let diff = if flat { 0.63 } else { ((p.nx * lv[0] + p.ny * lv[1] + lv[2]) / n).clamp(0.0, 1.0) };
+    // the crown's lumps tilt the surface the light meets, on top of the sprite's own tilt
+    let (nxl, nyl) = (p.nx - ds.lumps * 2.0 * p.lx, p.ny - ds.lumps * 2.0 * p.ly);
+    let n = (nxl * nxl + nyl * nyl + 1.0).sqrt();
+    let diff = if flat { 0.63 } else { ((nxl * lv[0] + nyl * lv[1] + lv[2]) / n).clamp(0.0, 1.0) };
     let ao = (1.0 - (p.b3 - p.hb).max(0.0) / (6.0 * s)).clamp(0.0, 1.0) * (1.0 - (p.b9 - p.hb).max(0.0) / (18.0 * s)).clamp(0.0, 1.0);
+    // canopy occlusion: the same small-scale cavities pushed harder, plus how far below its surroundings the spot is at
+    // crown scale, which is what darkens the places where crowns meet
+    let ao = if ds.canopy_ao > 0.0 { ao.powf(1.0 + 2.0 * ds.canopy_ao) * (1.0 + ds.canopy_ao * 0.9 * p.rel.min(0.0)).clamp(0.3, 1.0) } else { ao };
     if p.plain {
         // the sprite already holds the colour as a ramp position, so only light it
         let shade = (0.42 + 0.58 * diff) * (0.7 + 0.3 * ao);
@@ -701,6 +754,16 @@ fn sprite_color(p: SpritePixel, ls: &LeafStyle, ds: &DepthStyle, lv: [f32; 3], f
     for j in 0..3 {
         c[j] = (p.ramp[k][j] * (1.0 - f) + p.ramp[k + 1][j] * f) * shade * p.recol[j];
     }
+    if ds.translucency > 0.0 {
+        // thin leaves on the side facing away from the sun let the light through
+        let thin = (1.0 - depth).powf(0.8);
+        let back = ((0.55 - diff) / 0.55).clamp(0.0, 1.0);
+        let glow = ramp_color(p.ramp, 0.92);
+        let k = ds.translucency * thin * back * 1.6;
+        for j in 0..3 {
+            c[j] += glow[j] * k * p.recol[j];
+        }
+    }
     if ls.dappled > 0.0 {
         let fc = ((-p.bx - p.by) * 0.35 / s).clamp(0.0, 1.0) * ls.dappled;
         c[0] *= 1.0 + fc * 0.28;
@@ -725,6 +788,13 @@ fn sprite_color(p: SpritePixel, ls: &LeafStyle, ds: &DepthStyle, lv: [f32; 3], f
 
 /// Generate all layers at `scale` times map resolution. Returns None if cancelled.
 pub fn generate(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<RenderLayers> {
+    let aged;
+    let project = if project.gen.age > 0.0 && !project.gen.age_applied {
+        aged = project.aged();
+        &aged
+    } else {
+        project
+    };
     let plan = plan(project, scale, cancelled)?;
     let (w, h) = render_size(project, scale);
     let mut stamped = stamp_region(project, &plan, scale, Region { x0: 0, y0: 0, w, h }, cancelled)?;
@@ -801,7 +871,7 @@ impl Plan {
             let mut need: std::collections::HashSet<(String, u32, u32, u32)> = std::collections::HashSet::new();
             for t in self.groups[layer].iter().filter(in_rect) {
                 let sp = self.species.get(t.species as usize).unwrap_or(&fallback);
-                if let (Some(ty), true) = (sp.tree_type(false), t.r * s >= 1.0) {
+                if let (Some(ty), true) = (sp.tree_type(), t.r * s >= 1.0) {
                     need.insert((ty.to_string(), (t.seed % crate::treegen_sprite::VARIANTS as u64) as u32, size_bucket(t.r * s).to_bits(), sp.canopy_fill.to_bits()));
                 }
             }
@@ -837,7 +907,7 @@ impl Plan {
                 let sp = self.species.get(t.species as usize).unwrap_or(&fallback);
                 let mut tv = *t;
                 tv.h *= height_factor(t, depth);
-                sprite_instance(&tv, sp, s).map(|mut q| {
+                sprite_instance(&tv, sp, s, depth.weave).map(|mut q| {
                     // crowns only meet in the canopy layer
                     if layer == 1 {
                         q.fac = fac.map(|f| f[n]).filter(|f| f.iter().any(|v| *v < 255));
@@ -976,6 +1046,64 @@ fn drop_covered(small: &mut Vec<Tree>, big: &[Tree], reach: f32, ratio: f32) {
 /// How steeply the forest outline falls away outside the envelope, in outline distance per map pixel.
 const ENVELOPE_SLOPE: f32 = 3.0;
 
+/// Crowns compete for light: each one grows away from crowded neighbours toward the open space beside it, so a
+/// stand is not a lattice of identical discs. Every crown moves by how hard its neighbours push, largest neighbours
+/// pushing most, up to about four fifths of its own radius at full strength.
+fn lean_crowns(trees: &mut [Tree], k: f32) {
+    if k <= 0.0 || trees.len() < 2 {
+        return;
+    }
+    let rmax = trees.iter().map(|t| t.r).fold(1.0f32, f32::max);
+    let cell = (3.2 * rmax).max(1.0);
+    let (mut minx, mut miny) = (f32::MAX, f32::MAX);
+    for t in trees.iter() {
+        minx = minx.min(t.x);
+        miny = miny.min(t.y);
+    }
+    let key = |t: &Tree| (((t.x - minx) / cell) as i32, ((t.y - miny) / cell) as i32);
+    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    for (i, t) in trees.iter().enumerate() {
+        grid.entry(key(t)).or_default().push(i);
+    }
+    let moves: Vec<(f32, f32)> = (0..trees.len())
+        .into_par_iter()
+        .map(|i| {
+            let a = trees[i];
+            if a.painted {
+                return (0.0, 0.0);
+            }
+            let (cx, cy) = key(&a);
+            let (mut sx, mut sy) = (0.0f32, 0.0f32);
+            for yy in cy - 1..=cy + 1 {
+                for xx in cx - 1..=cx + 1 {
+                    let Some(v) = grid.get(&(xx, yy)) else { continue };
+                    for &j in v {
+                        if j == i {
+                            continue;
+                        }
+                        let b = trees[j];
+                        let (dx, dy) = (a.x - b.x, a.y - b.y);
+                        let d = (dx * dx + dy * dy).sqrt().max(1e-3);
+                        let reach = 1.8 * (a.r + b.r);
+                        if d < reach {
+                            let w = (1.0 - d / reach) * (b.r / a.r).clamp(0.5, 2.0);
+                            sx += dx / d * w;
+                            sy += dy / d * w;
+                        }
+                    }
+                }
+            }
+            let m = (sx * sx + sy * sy).sqrt();
+            let scale = if m > 1.0 { 1.0 / m } else { 1.0 };
+            (sx * scale * 0.8 * k * a.r, sy * scale * 0.8 * k * a.r)
+        })
+        .collect();
+    for (t, (dx, dy)) in trees.iter_mut().zip(moves) {
+        t.x += dx;
+        t.y += dy;
+    }
+}
+
 fn finish_trees(project: &Project, base: &[Vec<Tree>; 4], f: f32) -> ([Vec<Tree>; 4], [usize; 4], Vec<TreeRec>, f32) {
     let g = &project.gen;
     let mut groups = base.clone();
@@ -984,6 +1112,7 @@ fn finish_trees(project: &Project, base: &[Vec<Tree>; 4], f: f32) -> ([Vec<Tree>
             v.retain(|t| !project.erased.iter().any(|e| (t.x * f - e[0]).powi(2) + (t.y * f - e[1]).powi(2) < e[2] * e[2]));
         }
     }
+    lean_crowns(&mut groups[1], g.crown_lean.clamp(0.0, 1.0));
     if g.painted_trees {
         for p in &project.painted {
             groups[p.layer.index()].push(Tree {
@@ -1019,7 +1148,7 @@ fn finish_trees(project: &Project, base: &[Vec<Tree>; 4], f: f32) -> ([Vec<Tree>
         }
         for (i, u) in used.iter().enumerate() {
             let sp = &project.species[i];
-            if let (true, Some(ty)) = (*u, sp.tree_type(g.procedural_forms)) {
+            if let (true, Some(ty)) = (*u, sp.tree_type()) {
                 crate::treegen_sprite::prewarm(ty, sp.canopy_fill);
             }
         }
@@ -1058,7 +1187,7 @@ pub fn plan(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)
 
     // 1. Shape mask and depth field D (0 at the drawn edge, 1 deep inside, negative outside).
     let mut mask = Field::new(w, h);
-    for shape in project.shapes.iter().filter(|s| s.visible) {
+    for shape in project.shapes_clearings_last().filter(|s| s.visible) {
         let pts: Vec<[f32; 2]> = shape.points.iter().map(|p| [p[0] * scale, p[1] * scale]).collect();
         fill_polygon(&mut mask, &pts, if shape.op == ShapeOp::Add { 1.0 } else { 0.0 });
     }
@@ -1199,26 +1328,31 @@ pub fn plan(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)
         v[yi * w + xi]
     };
     let area = map_w * map_h;
-    let mut rng = Rng::new(g.seed);
-    let tone = |rng: &mut Rng| rng.normal(0.0, 0.1);
+    let layer_seed = |k: u64| g.seed.wrapping_add(k.wrapping_mul(1_000_003)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
 
     let crown_min = g.crown_min.max(1.0);
     let crown_max = g.crown_max.max(crown_min + 0.1);
-    let mut canopy: Vec<Tree> = scatter(&mut rng, map_w, map_h, (0.078 * area) as usize, crown_min, crown_max, 0.55, |x, y, _| {
-        if at(&can_fit, x, y) > 0.8 {
+    // Trees gather in clusters when asked: a likelihood that falls away from the clusters.
+    let clump = (g.clump > 0.0).then(|| clump_field(layer_seed(11), map_w, map_h, g.clump_size, g.clump.clamp(0.0, 1.0)));
+    let mut canopy: Vec<Tree> = scatter(layer_seed(2), map_w, map_h, (0.078 * area) as usize, crown_min, crown_max, 0.55, |x, y| {
+        let base = if at(&can_fit, x, y) > 0.8 {
             1.0
         } else if at(&can_mask, x, y) > 0.5 {
             0.15
         } else {
             0.0
+        };
+        match &clump {
+            Some(c) if base > 0.0 => base * c(x, y),
+            _ => base,
         }
     })
     .into_iter()
-    .map(|(x, y, r)| Tree::gen(x, y, r, r * 1.3 + 18.0, tone(&mut rng)))
+    .map(|(x, y, r, tone)| Tree::gen(x, y, r, r * 1.3 + 18.0, tone))
     .collect();
 
     let mut shrubs: Vec<Tree> = if realistic {
-        scatter(&mut rng, map_w, map_h, (0.017 * area) as usize, 4.0, 9.0, 1.0, |x, y, _| {
+        scatter(layer_seed(1), map_w, map_h, (0.017 * area) as usize, 4.0, 9.0, 1.0, |x, y| {
             if at_v(&grass_a, x, y) > 0.5 && at(&can_mask, x, y) < 0.5 {
                 (0.6 * g.shrub_density).min(1.0)
             } else {
@@ -1226,17 +1360,18 @@ pub fn plan(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)
             }
         })
         .into_iter()
-        .map(|(x, y, r)| Tree::gen(x, y, r, r * 0.8 + 4.0, tone(&mut rng)))
+        .map(|(x, y, r, tone)| Tree::gen(x, y, r, r * 0.8 + 4.0, tone))
         .collect()
     } else {
         Vec::new()
     };
 
-    // Lone trees: Matern cluster process in the fringe band.
+    // Lone trees: Matern cluster process in the fringe band. Each parent draws from its own numbers.
     let mut lone = Vec::new();
     if realistic {
         let parents = (0.0035 * area * g.lone_groups) as usize;
-        for _ in 0..parents {
+        for k in 0..parents {
+            let mut rng = dart(layer_seed(3), k);
             let x = rng.f32() * map_w;
             let y = rng.f32() * map_h;
             let d = at(&depth, x, y);
@@ -1247,14 +1382,14 @@ pub fn plan(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)
                 for _ in 0..n {
                     let r = if rng.f32() < 0.5 { rng.range(8.0, 15.0) } else { rng.range(3.0, 6.0) };
                     let (cx, cy) = (x + rng.normal(0.0, 14.0), y + rng.normal(0.0, 14.0));
-                    lone.push(Tree::gen(cx, cy, r, r * 1.4 + 12.0, tone(&mut rng)));
+                    lone.push(Tree::gen(cx, cy, r, r * 1.4 + 12.0, rng.normal(0.0, 0.1)));
                 }
             }
         }
     }
 
     let mut pebbles: Vec<Tree> = if realistic {
-        scatter(&mut rng, map_w, map_h, (0.003 * area * g.pebbles) as usize, 2.0, 4.5, 1.2, |x, y, _| {
+        scatter(layer_seed(4), map_w, map_h, (0.003 * area * g.pebbles) as usize, 2.0, 4.5, 1.2, |x, y| {
             let d = at(&depth, x, y);
             if d > -0.7 && d < 0.15 && at(&can_mask, x, y) < 0.5 {
                 0.35 * ss(-0.75, -0.1, d)
@@ -1263,7 +1398,7 @@ pub fn plan(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)
             }
         })
         .into_iter()
-        .map(|(x, y, r)| Tree::gen(x, y, r, r + 3.0, tone(&mut rng)))
+        .map(|(x, y, r, tone)| Tree::gen(x, y, r, r + 3.0, tone))
         .collect()
     } else {
         Vec::new()
@@ -1281,7 +1416,7 @@ pub fn plan(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)
         .collect();
     if realistic && g.mushrooms > 0.0 && mix_total > 0.0 {
         let kinds = &mush_species;
-        let parents = scatter(&mut rng, map_w, map_h, (0.0006 * area * g.mushrooms) as usize, 14.0, 14.5, 1.0, |x, y, _| {
+        let parents = scatter(layer_seed(5), map_w, map_h, (0.0006 * area * g.mushrooms) as usize, 14.0, 14.5, 1.0, |x, y| {
             let d = at(&depth, x, y);
             if d > -0.6 && d < 0.9 && at(&can_mask, x, y) < 0.5 {
                 // more where the ground is open, none under a crown
@@ -1290,7 +1425,8 @@ pub fn plan(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)
                 0.0
             }
         });
-        for (px, py, _) in parents {
+        for (pi, (px, py, _, _)) in parents.into_iter().enumerate() {
+            let mut rng = dart(layer_seed(6), pi);
             // pick a kind by the mix
             let mut pick = rng.f32() * mix_total;
             let mut kind = 0;
@@ -1312,7 +1448,7 @@ pub fn plan(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)
                 let (x, y) = (px + rng.normal(0.0, 8.0), py + rng.normal(0.0, 8.0));
                 if placed.iter().all(|q| ((q.0 - x).powi(2) + (q.1 - y).powi(2)).sqrt() > (q.2 + r) * 0.8) {
                     placed.push((x, y, r));
-                    let mut t = Tree::gen(x, y, r, r * 0.32 + 0.6, tone(&mut rng));
+                    let mut t = Tree::gen(x, y, r, r * 0.32 + 0.6, rng.normal(0.0, 0.1));
                     t.species = sp;
                     mushrooms.push(t);
                 }
@@ -1346,6 +1482,25 @@ pub fn plan(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)
             if fbm_warped(t.x, t.y, sc, 4, sd + 70, sc * 0.5, sc) > q {
                 t.species = g.mix_species;
             }
+        }
+    }
+    // Stand age: each tree type grows along its own curve and stops at its own largest crown. The settings were aged
+    // for the main type, so other types are brought to their own stage from there.
+    if g.age > 0.0 && g.age_applied {
+        let preset_of = |sp: u8| project.species.get(sp as usize).map(|s| s.preset.as_str()).unwrap_or("");
+        let gm = crate::age::growth(g.age, preset_of(g.main_species));
+        for t in canopy.iter_mut() {
+            let p = preset_of(t.species);
+            if p.starts_with("mushroom_") {
+                continue;
+            }
+            t.r = (t.r * crate::age::growth(g.age, p) / gm).min(crate::age::max_crown_px(p)).max(1.0);
+            t.h = t.r * 1.3 + 18.0;
+        }
+        for t in lone.iter_mut() {
+            let p = preset_of(t.species);
+            t.r = (t.r * crate::age::growth(g.age, p)).min(crate::age::max_crown_px(p)).max(1.0);
+            t.h = t.r * 1.4 + 12.0;
         }
     }
     // Giants: some of the canopy trees are mushrooms as big as the trees, picked by their own seed.
@@ -1401,7 +1556,7 @@ pub fn plan(project: &Project, scale: f32, cancelled: &(dyn Fn() -> bool + Sync)
     let species: Vec<Species> = project
         .species
         .iter()
-        .map(|sp| Species { procedural: sp.procedural || g.procedural_forms, ..sp.clone() })
+        .cloned()
         .collect();
     mark("5 plan");
     Some(Plan {
@@ -1446,6 +1601,28 @@ pub struct Stamped {
     pub(crate) area_a: Vec<f32>,
 }
 
+/// The height of the tallest tree at every pixel of the map at `scale`, in render pixels, like a lidar canopy
+/// height model. For comparing stand structure (cover, gaps, crown size and spacing) with measured canopies.
+pub fn canopy_height_map(project: &Project, scale: f32) -> Option<(usize, usize, Vec<f32>)> {
+    let aged;
+    let project = if project.gen.age > 0.0 && !project.gen.age_applied {
+        aged = project.aged();
+        &aged
+    } else {
+        project
+    };
+    let plan = plan(project, scale, &|| false)?;
+    let (w, h) = render_size(project, scale);
+    let stamped = stamp_region(project, &plan, scale, Region { x0: 0, y0: 0, w, h }, &|| false)?;
+    let mut out = vec![0f32; w * h];
+    for st in &stamped.stamps {
+        for (o, v) in out.iter_mut().zip(&st.height) {
+            *o = o.max(*v);
+        }
+    }
+    Some((w, h, out))
+}
+
 /// Draw the planned trees, haze and grass cover into one region at `scale`.
 pub fn stamp_region(project: &Project, plan: &Plan, scale: f32, region: Region, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Stamped> {
     let g = &project.gen;
@@ -1477,7 +1654,7 @@ pub fn stamp_region(project: &Project, plan: &Plan, scale: f32, region: Region, 
     let clip_on = g.contain && plan.any_shape && g.contain_clip;
     let area_a: Vec<f32> = if clip_on {
         let mut mask = Field::new(w, h);
-        for shape in project.shapes.iter().filter(|s| s.visible) {
+        for shape in project.shapes_clearings_last().filter(|s| s.visible) {
             let pts: Vec<[f32; 2]> = shape.points.iter().map(|p| [p[0] * scale - ox as f32, p[1] * scale - oy as f32]).collect();
             fill_polygon(&mut mask, &pts, if shape.op == ShapeOp::Add { 1.0 } else { 0.0 });
         }
@@ -1553,6 +1730,7 @@ pub fn shade_region(
     let (map_w, map_h) = (project.map_w as f32 / f, project.map_h as f32 / f);
     let sd = (g.seed as u32).wrapping_mul(7919);
     let realistic = g.edge_mode == EdgeMode::Realistic;
+    let smooth_r = crate::smooth::radius(g.depth.smooth, 0.5 * (g.crown_min + g.crown_max) * s);
     let nat = |x: usize, y: usize| (((x + ox) as f32 + 0.5) * inv, ((y + oy) as f32 + 0.5) * inv);
     let timing = std::env::var_os("FOREST_TIMING").is_some();
     let clock = std::time::Instant::now();
@@ -1742,6 +1920,7 @@ pub fn shade_region(
         let b_big = hf.blur(g.depth.shade_radius.max(2.0) * s).data;
         let rel_scale = 1.0 / (g.depth.shade_radius.max(2.0) * s * 0.8);
         let alpha = Field::from_fn(w, h, |x, y| (hb[y * w + x] > 0.0) as u8 as f32).blur(0.6 * s).data;
+        let b3_at = |x: i32, y: i32| b3[(y.clamp(0, h as i32 - 1) as usize) * w + x.clamp(0, w as i32 - 1) as usize];
         let mut rgb = vec![[0f32; 3]; w * h];
         rgb.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
             for (x, px) in row.iter_mut().enumerate() {
@@ -1764,6 +1943,8 @@ pub fn shade_region(
                         b9: b9[i],
                         bx: (blurred.at(x as i32 + 1, y as i32) - blurred.at(x as i32 - 1, y as i32)) * 0.5,
                         by: (blurred.at(x as i32, y as i32 + 1) - blurred.at(x as i32, y as i32 - 1)) * 0.5,
+                        lx: (b3_at(x as i32 + 1, y as i32) - b3_at(x as i32 - 1, y as i32)) * 0.5,
+                        ly: (b3_at(x as i32, y as i32 + 1) - b3_at(x as i32, y as i32 - 1)) * 0.5,
                         rel: (hb[i] - b_big[i]) * rel_scale,
                         ramp: &ramps[(st.species[i] as usize).min(ramps.len() - 1)],
                         bark: barks[(st.species[i] as usize).min(barks.len() - 1)],
@@ -1944,6 +2125,7 @@ pub fn shade_region(
         clip_shadow(&mut shadow);
         let mut grass_alpha = grass_a.clone();
         clip(&mut grass_alpha, None);
+        crate::smooth::smooth_layer(&mut rgb, &mut grass_alpha, w, h, smooth_r);
         layers.push(LayerBuf::new(LayerKind::Grass, w, h, rgb, grass_alpha, shadow));
     } else {
         // Blurred mode: a dark continuous canopy floor so no background shows between crowns.
@@ -1972,7 +2154,7 @@ pub fn shade_region(
             owned = std::mem::replace(&mut stamped.stamps[j], Stamp::new(0, 0));
             &owned
         };
-        let (rgb, mut alpha) = shade_layer(st, recols[j]);
+        let (mut rgb, mut alpha) = shade_layer(st, recols[j]);
         mark("layer shaded");
         let mut shadow = shadow_for(Some(&st.height), &|i| alpha[i] > 0.0);
         mark("layer shadow");
@@ -1982,6 +2164,7 @@ pub fn shade_region(
         let painted = painted_px.as_ref().map(|p| Field { w, h, data: p.clone() }.blur(1.0 * s).data);
         apply_fade(&mut alpha, painted.as_ref());
         clip(&mut alpha, painted_px.as_ref());
+        crate::smooth::smooth_layer(&mut rgb, &mut alpha, w, h, smooth_r);
         layers.push(LayerBuf::new(kinds[j], w, h, rgb, alpha, shadow));
     }
     mark("layers done");

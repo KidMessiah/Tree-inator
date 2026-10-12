@@ -42,26 +42,6 @@ impl Slot {
     }
 }
 
-/// A row of choices; returns the one clicked. `current` is highlighted.
-pub(super) fn choices<T: Copy>(ui: &mut egui::Ui, label: &str, opts: &[(&str, T)], current: Option<usize>) -> Option<T> {
-    let mut out = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.add_sized([86.0, 18.0], egui::Label::new(label));
-        for (k, (name, v)) in opts.iter().enumerate() {
-            if ui.selectable_label(current == Some(k), *name).clicked() {
-                out = Some(*v);
-            }
-        }
-    });
-    out
-}
-
-/// Index of the option closest to `v`.
-pub(super) fn nearest(opts: &[(&str, f32)], v: f32) -> Option<usize> {
-    opts.iter().enumerate().min_by(|a, b| (a.1 .1 - v).abs().total_cmp(&(b.1 .1 - v).abs())).map(|(i, _)| i)
-}
-
-
 impl TreeApp {
     /// The species a slot uses, copied first if another slot shares it, so changing one leaves the others alone.
     fn own_slot(&mut self, slot: Slot) -> usize {
@@ -90,26 +70,19 @@ impl TreeApp {
 
     pub(super) fn tree_type_picker(&mut self, ui: &mut egui::Ui, slot: Slot, label: &str) {
         let i = slot.index(&self.project.gen);
-        let all = self.project.gen.procedural_forms;
         let Some(sp) = self.project.species.get(i) else { return };
-        let current = sp.tree_type(all).map(str::to_string);
-        let text = match &current {
-            Some(t) => tree_type_label(t).to_string(),
-            None => format!("{} (built-in)", sp.form.name()),
-        };
-        let mut pick: Option<Option<&str>> = None;
+        let current = sp.tree_type().map(str::to_string);
+        let text = current.as_deref().map(|t| tree_type_label(t).to_string()).unwrap_or_else(|| "None".into());
+        let mut pick: Option<&str> = None;
         ui.horizontal(|ui| {
-            ui.add_sized([86.0, 18.0], egui::Label::new(label));
-            egui::ComboBox::from_id_salt(("simple_type", slot.suffix())).width(190.0).selected_text(text).show_ui(ui, |ui| {
-                if !all {
-                    if ui.selectable_label(current.is_none(), "Built-in (from the theme)").clicked() {
-                        pick = Some(None);
-                    }
-                    ui.separator();
-                }
+            ui.allocate_ui_with_layout(egui::Vec2::new(super::tuning::LABEL_W, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.set_min_size(egui::Vec2::new(super::tuning::LABEL_W, 20.0));
+                ui.label(format!("  {label}"));
+            });
+            egui::ComboBox::from_id_salt(("simple_type", slot.suffix())).width((ui.available_width() - 40.0).clamp(120.0, 260.0)).selected_text(text).show_ui(ui, |ui| {
                 for (key, name) in TREE_TYPES.iter().filter(|t| !forest_core::mushrooms::is_mushroom(t.0)) {
                     if ui.selectable_label(current.as_deref() == Some(*key), *name).clicked() {
-                        pick = Some(Some(*key));
+                        pick = Some(*key);
                     }
                 }
             });
@@ -117,13 +90,8 @@ impl TreeApp {
         if let Some(p) = pick {
             let j = self.own_slot(slot);
             let sp = &mut self.project.species[j];
-            match p {
-                Some(key) => {
-                    sp.procedural = true;
-                    sp.preset = key.to_string();
-                }
-                None => sp.procedural = false,
-            }
+            sp.procedural = true;
+            sp.preset = p.to_string();
         }
     }
 }

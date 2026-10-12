@@ -26,11 +26,16 @@ fn drawable(mut p: Project) -> Project {
 /// the project's, and the groups are stacked in drawing order. Neighbouring groups that end up with the same
 /// settings and the same clearings are drawn together, so a group that changes nothing costs nothing extra.
 pub fn zone_passes(p: &Project) -> Vec<Project> {
+    // every pass carries its own stand age, which may be a group's, worked into its settings
+    zone_passes_raw(p).into_iter().map(|q| q.aged()).collect()
+}
+
+fn zone_passes_raw(p: &Project) -> Vec<Project> {
     // projects saved in an older way are brought up to date first
     if p.shapes.iter().any(|s| s.settings.is_some()) || p.groups.iter().any(|n| n.settings.is_some() || n.id == 0) {
         let mut q = p.clone();
         q.migrate_groups();
-        return zone_passes(&q);
+        return zone_passes_raw(&q);
     }
     if !p.shapes.iter().any(|s| p.zone_group(s).is_some()) {
         return vec![drawable(p.clone())];

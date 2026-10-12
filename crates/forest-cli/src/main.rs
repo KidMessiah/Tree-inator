@@ -3,6 +3,7 @@
 //! `-strips` renders strip by strip, the way the app exports, so memory stays bounded. `-gpu` shades and
 //! composites on the GPU (`-gpushade` uses CPU stamps, `-gpu` stamps on the GPU too).
 
+use forest_core::render::{export_strips_as, export_strips_gpu_as, ExportFormat};
 use forest_core::*;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -12,13 +13,20 @@ fn main() {
     let mut project_path = None;
     let mut theme: Option<String> = None;
     let mut out = PathBuf::from("out.png");
+    let mut out_set = false;
     let mut scale = 1.0f32;
     let mut background = false;
     let mut strips = false;
+    let mut format = ExportFormat::Png;
+    let mut over: Option<PathBuf> = None;
+    let mut save: Option<PathBuf> = None;
     let mut gpu = false;
     let mut gpu_shade_only = false;
     let mut shy: Option<f32> = None;
     let mut shy_giants = false;
+    let mut weave: Option<f32> = None;
+    let mut smooth: Option<f32> = None;
+    let mut chm_path: Option<PathBuf> = None;
     let mut strokes_path: Option<PathBuf> = None;
     let mut trees_path: Option<PathBuf> = None;
     let mut i = 0;
@@ -26,6 +34,7 @@ fn main() {
         match args[i].as_str() {
             "-out" => {
                 i += 1;
+                out_set = true;
                 out = args[i].clone().into();
             }
             "-scale" => {
@@ -34,6 +43,24 @@ fn main() {
             }
             "-bg" => background = true,
             "-strips" => strips = true,
+            "-save" => {
+                i += 1;
+                save = Some(args[i].clone().into());
+            }
+            "-over" => {
+                i += 1;
+                over = Some(args[i].clone().into());
+            }
+            "-format" => {
+                i += 1;
+                format = match args[i].as_str() {
+                    "small" => ExportFormat::PngSmall,
+                    "tiles" => ExportFormat::Tiles,
+                    "webp" => ExportFormat::Webp,
+                    "jpg" | "jpeg" => ExportFormat::Jpeg,
+                    _ => ExportFormat::Png,
+                };
+            }
             "-gpu" => gpu = true,
             "-gpushade" => {
                 gpu = true;
@@ -44,6 +71,18 @@ fn main() {
                 shy = Some(args[i].parse().expect("gap"));
             }
             "-shygiants" => shy_giants = true,
+            "-chm" => {
+                i += 1;
+                chm_path = Some(args[i].clone().into());
+            }
+            "-smooth" => {
+                i += 1;
+                smooth = Some(args[i].parse().expect("smooth"));
+            }
+            "-weave" => {
+                i += 1;
+                weave = Some(args[i].parse().expect("weave"));
+            }
             "-theme" => {
                 i += 1;
                 theme = Some(args[i].clone());
@@ -72,24 +111,56 @@ fn main() {
         let t = themes().into_iter().find(|t| t.name.eq_ignore_ascii_case(name)).expect("unknown theme");
         project.apply_theme(&t);
     }
+    // settings given after the theme, as a JSON patch of the project: they win over what the theme set
+    if let Some(p) = &over {
+        let patch: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(p).expect("read patch")).expect("parse patch");
+        let mut cur = serde_json::to_value(&project).expect("project json");
+        forest_core::groups::merge_value(&mut cur, &patch);
+        project = serde_json::from_value(cur).expect("patched project");
+    }
+    // write the project as it stands after the theme and patch, for opening in the app
+    if let Some(p) = &save {
+        std::fs::write(p, serde_json::to_string_pretty(&project).expect("project json")).expect("write project");
+        println!("project saved to {}", p.display());
+        if !out_set {
+            return;
+        }
+    }
     if let Some(gap) = shy {
         project.gen.crown_shyness = true;
         project.gen.shyness_gap = gap;
         project.gen.shyness_giants_only = shy_giants;
+    }
+    if let Some(w) = weave {
+        project.gen.depth.weave = w;
+    }
+    if let Some(v) = smooth {
+        project.gen.depth.smooth = v;
     }
     if let Some(sp) = &strokes_path {
         apply_strokes(&mut project, sp);
         println!("strokes: {} painted trees, {} erased areas", project.painted.len(), project.erased.len());
     }
 
+    if let Some(p) = &chm_path {
+        // a 16 bit picture of tree heights, 1/256 render pixel per step, for comparing with lidar canopy models
+        let (w, h, hm) = forest_core::engine::canopy_height_map(&project, scale).expect("height map");
+        let img = image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_vec(w as u32, h as u32, hm.iter().map(|v| (v * 256.0).clamp(0.0, 65535.0) as u16).collect()).expect("height image");
+        img.save(p).expect("save height map");
+        println!("wrote {}", p.display());
+        // with -out as well, the picture is rendered too, so one run gives both
+        if !out_set {
+            return;
+        }
+    }
     let t = Instant::now();
     if strips {
         let opts = ComposeOptions { background: background.then_some([214.0 / 255.0, 205.0 / 255.0, 180.0 / 255.0]), ..Default::default() };
         if gpu {
             let g = forest_core::gpu::Gpu::headless().expect("no usable GPU");
-            export_strips_gpu(&g, &project, scale, &[(out.clone(), opts)], &|| false, &mut |_| {}).expect("export");
+            export_strips_gpu_as(&g, &project, scale, &[(out.clone(), opts)], format, &|| false, &mut |_| {}).expect("export");
         } else {
-            export_strips(&project, scale, &[(out.clone(), opts)], &|| false, &mut |_| {}).expect("export");
+            export_strips_as(&project, scale, &[(out.clone(), opts)], format, &|| false, &mut |_| {}).expect("export");
         }
         println!("strips: {:.2}s", t.elapsed().as_secs_f32());
         println!("wrote {}", out.display());

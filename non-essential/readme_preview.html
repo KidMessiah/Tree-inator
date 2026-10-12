@@ -1,0 +1,866 @@
+<!doctype html><html><head><meta charset="utf-8"><title>README preview</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown-light.min.css"><style>body{background:#f6f8fa;margin:0;padding:24px}.wrap{max-width:1012px;margin:0 auto;background:#fff;border:1px solid #d0d7de;border-radius:6px}.bar{padding:10px 16px;border-bottom:1px solid #d0d7de;font:600 14px sans-serif;background:#f6f8fa}.markdown-body{padding:32px}img{max-width:100%}</style></head><body><div class="wrap"><div class="bar">README.md</div><article class="markdown-body"><h1>Tree-inator</h1>
+<p>Tree-inator turns drawn shapes into a top-down forest picture made of generated trees. A zone is drawn on a map and a forest grows inside it: trees of the chosen types, shrubs, grass, haze and cast shadows. The result is written at the size of the map as a PNG or another picture format.</p>
+<p>This document covers building and running the tool, using the app, how each stage of the engine works, how tree types are generated and tuned, how themes are built, and the sources behind the methods.</p>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/demo_render.png"><img src="../docs/images/demo_render.png" alt="A rendered forest" style="max-width: 100%;"></a></p>
+<p><em>A drawing of three zones (two forests and a clearing) rendered with the Eastern Hardwood theme.</em></p>
+<p>Contents</p>
+<ol>
+<li><a href="#1-repository-layout">Repository layout</a></li>
+<li><a href="#2-build-and-run">Build and run</a></li>
+<li><a href="#3-using-the-app">Using the app</a></li>
+<li><a href="#4-project-files">Project files</a></li>
+<li><a href="#5-how-the-picture-is-made-stage-by-stage">How the picture is made, stage by stage</a></li>
+<li><a href="#6-tree-types-and-the-tree-lab">Tree types and the tree lab</a></li>
+<li><a href="#7-themes">Themes</a></li>
+<li><a href="#8-settings-reference">Settings reference</a></li>
+<li><a href="#9-tools-folder">Tools folder</a></li>
+<li><a href="#10-references">References</a></li>
+</ol>
+<hr>
+<h2>1. Repository layout</h2>
+<pre class="notranslate"><code class="notranslate">crates/forest-core    the engine: everything that makes the picture
+crates/tree-inator    the desktop app (egui), render worker thread, tuning panel
+crates/forest-cli     command line renderer
+tools/                small scripts for previewing tree types and themes, and for baking theme cards
+non-essential/        research data and scripts, backups, design mocks and old material; not needed to build or run
+</code></pre>
+<p>Inside <code class="notranslate">forest-core/src</code>:</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>File</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">engine.rs</code></td>
+<td>Plans the forest (distance map, cover, placement), stamps trees into a height map, shades every pixel.</td>
+</tr>
+<tr>
+<td><code class="notranslate">age.rs</code></td>
+<td>Stand age: growth curves and the largest crown of each tree type.</td>
+</tr>
+<tr>
+<td><code class="notranslate">treegen.rs</code>, <code class="notranslate">treegen_data.rs</code></td>
+<td>The parametric tree generator and its base presets.</td>
+</tr>
+<tr>
+<td><code class="notranslate">treegen_sprite.rs</code></td>
+<td>Draws generated trees from above into sprites; caches them.</td>
+</tr>
+<tr>
+<td><code class="notranslate">extra.rs</code>, <code class="notranslate">assets/extra_presets.json</code></td>
+<td>More tree types made from base presets, plus roots, logs and stumps.</td>
+</tr>
+<tr>
+<td><code class="notranslate">dead.rs</code></td>
+<td>Dead and burnt trees made by damaging living ones in stages.</td>
+</tr>
+<tr>
+<td><code class="notranslate">mushrooms.rs</code></td>
+<td>Baked mushroom sprites.</td>
+</tr>
+<tr>
+<td><code class="notranslate">shy.rs</code></td>
+<td>Crown shyness: squash factors that leave channels between crowns.</td>
+</tr>
+<tr>
+<td><code class="notranslate">smooth.rs</code></td>
+<td>Optional edge-preserving smoothing filter.</td>
+</tr>
+<tr>
+<td><code class="notranslate">field.rs</code>, <code class="notranslate">noise.rs</code>, <code class="notranslate">rng.rs</code></td>
+<td>Float rasters and blur, value noise and fractal noise, a small seeded random generator.</td>
+</tr>
+<tr>
+<td><code class="notranslate">geom.rs</code></td>
+<td>Zone geometry: boolean operations, offsets, outline tracing and simplification.</td>
+</tr>
+<tr>
+<td><code class="notranslate">groups.rs</code>, <code class="notranslate">stack.rs</code></td>
+<td>Groups of zones with their own settings, and the passes they are drawn in.</td>
+</tr>
+<tr>
+<td><code class="notranslate">compose.rs</code>, <code class="notranslate">render.rs</code></td>
+<td>Grading and stacking of layers, preview caching, strip-by-strip export in several formats.</td>
+</tr>
+<tr>
+<td><code class="notranslate">params.rs</code></td>
+<td>Every setting, the species list, the themes.</td>
+</tr>
+<tr>
+<td><code class="notranslate">gpu/</code></td>
+<td>Shading and compositing on the graphics card (<code class="notranslate">kernels.wgsl</code>, <code class="notranslate">stamp.wgsl</code>).</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>Inside <code class="notranslate">crates/tree-inator/src</code>: <code class="notranslate">app.rs</code> (state and panels), <code class="notranslate">app/tuning.rs</code> (the settings registry and search), <code class="notranslate">app/tools.rs</code> and <code class="notranslate">app/zones.rs</code> (drawing tools and the zones panel), <code class="notranslate">app/compare.rs</code> (compare mode), <code class="notranslate">app/panel.rs</code> (theme cards), <code class="notranslate">worker.rs</code> (render and export thread).</p>
+<hr>
+<h2>2. Build and run</h2>
+<p>Requirements: a recent stable Rust toolchain on Windows with a graphics card that supports wgpu (Vulkan or DirectX 12). Without a usable card the engine renders on the processor. Python 3 with Pillow is needed only for the scripts in <code class="notranslate">tools/</code>.</p>
+<pre class="notranslate"><code class="notranslate">cargo build --release
+cargo run --release -p tree-inator
+</code></pre>
+<p>The app is <code class="notranslate">target/release/tree-inator.exe</code>. Windows will not replace a running exe, so the app must be closed before rebuilding.</p>
+<h3>Command line renderer</h3>
+<pre class="notranslate"><code class="notranslate">forest-cli [project.treeproj] [options]
+</code></pre>
+<p>With no project a test shape is rendered.</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Option</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">-out FILE</code></td>
+<td>Output file (default <code class="notranslate">out.png</code>).</td>
+</tr>
+<tr>
+<td><code class="notranslate">-scale S</code></td>
+<td>Render scale; 1.0 is one pixel per map pixel.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-bg</code></td>
+<td>Tan background, for viewing.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-theme NAME</code></td>
+<td>Apply a theme (case-insensitive name) after loading.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-over FILE</code></td>
+<td>A JSON patch of the project, merged after the theme, so it wins over the theme's settings.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-strips</code></td>
+<td>Render strip by strip, as the app exports, so memory stays bounded.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-format png|small|tiles|webp|jpg</code></td>
+<td>Export format with <code class="notranslate">-strips</code>.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-gpu</code>, <code class="notranslate">-gpushade</code></td>
+<td>Shade and composite on the graphics card; <code class="notranslate">-gpushade</code> stamps on the processor.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-shy GAP</code></td>
+<td>Turn crown shyness on with a gap width. <code class="notranslate">-shygiants</code> limits it to giant mushrooms.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-weave X</code>, <code class="notranslate">-smooth X</code></td>
+<td>Set canopy weave or smoothing.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-chm FILE</code></td>
+<td>Write the canopy height map (16 bit, 1/256 render pixel per step). With <code class="notranslate">-out</code>, the picture is also rendered.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-trees FILE</code></td>
+<td>Write the final tree list as JSON.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-strokes FILE</code></td>
+<td>Replay brush strokes from a file.</td>
+</tr>
+<tr>
+<td><code class="notranslate">-save FILE</code></td>
+<td>Write the project as it stands after <code class="notranslate">-theme</code> and <code class="notranslate">-over</code>. Without <code class="notranslate">-out</code>, nothing is rendered.</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>Examples (PowerShell, from the repository root):</p>
+<pre class="notranslate"><code class="notranslate"># render a project with a theme, on the tan background
+.\target\release\forest-cli.exe tools\sample_projects\demo_forest.json -theme "Aspen Stand" -bg -out aspen.png
+
+# render at 2x, strip by strip, as a lossless WebP
+.\target\release\forest-cli.exe tools\sample_projects\demo_forest.json -strips -scale 2 -format webp -out map.webp
+
+# a JSON patch applied after the theme: write patch.json, then pass it with -over
+'{"gen":{"age":80,"clump":0.5}}' | Set-Content patch.json
+.\target\release\forest-cli.exe tools\sample_projects\demo_forest.json -theme "Eastern Hardwood" -over patch.json -bg -out aged.png
+
+# save the project as it stands after the theme and patch (opens in the app)
+.\target\release\forest-cli.exe tools\sample_projects\demo_forest.json -theme "Oak Savanna" -save demo_oak.json
+
+# write the canopy height map and the tree list
+.\target\release\forest-cli.exe tools\sample_projects\demo_forest.json -chm height.png -trees trees.json
+</code></pre>
+<p>The same commands in a POSIX shell use forward slashes and <code class="notranslate">./target/release/forest-cli</code>. <code class="notranslate">tools/sample_projects/demo_forest.json</code> is the project behind the pictures in this document. The Open button in the top bar loads it in the app.</p>
+<h3>Environment variables</h3>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Variable</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">TREE_INATOR_EXTRAS</code></td>
+<td>Path to a copy of <code class="notranslate">extra_presets.json</code>. Tree types are read from it instead of the built-in table, and the sprite cache is bypassed.</td>
+</tr>
+<tr>
+<td><code class="notranslate">TREE_INATOR_CACHE</code></td>
+<td>Folder for the on-disk sprite cache, or <code class="notranslate">off</code>. The default is <code class="notranslate">%LOCALAPPDATA%\Tree-inator\sprites</code>. The cache is keyed to a hash of every source and asset file in <code class="notranslate">forest-core</code>, so any change to the generator or the presets starts a fresh cache after a rebuild.</td>
+</tr>
+<tr>
+<td><code class="notranslate">FOREST_TIMING</code></td>
+<td>Prints the time taken by each stage.</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<hr>
+<h2>3. Using the app</h2>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/ui_main.png"><img src="../docs/images/ui_main.png" alt="The main window" style="max-width: 100%;"></a></p>
+<p><em>The main window: tool strip, zones panel, map, tuning panel and species strip.</em></p>
+<h3>Drawing zones</h3>
+<p>The tool strip on the left holds the tools. Keys in brackets switch to them.</p>
+<ul>
+<li><strong>Select (V):</strong> click a zone to select it, drag its corners or the zone itself, double click an edge to add a corner, right click a corner to remove it. Ctrl or Shift click adds to the selection. Delete removes the zone.</li>
+<li><strong>Lasso (L):</strong> drag a loop. Jitter is removed and corners are rounded by the Smooth setting.</li>
+<li><strong>Polygon (P):</strong> click corners; Enter or right click closes the shape; Escape cancels.</li>
+<li><strong>Wand (W):</strong> click a region of an imported map picture and its outline is traced from colour. Tolerance sets how different a pixel may be from the one clicked; Contiguous limits the region to connected pixels.</li>
+<li><strong>Line (N):</strong> draws a path. The path is cut as a clearing of a set width, laid with a row of trees at a set spacing, or used to split the selected zone in two.</li>
+<li><strong>Brush (B), Single tree (T), Eraser (E):</strong> paint, place or remove individual trees. The keys <code class="notranslate">[</code> and <code class="notranslate">]</code> change the brush size.</li>
+<li><strong>No-trees mask (M):</strong> a zone where no trees grow.</li>
+<li><strong>Pan (H):</strong> moves the map. Middle drag or Space and drag also pan; the wheel zooms; F fits the map.</li>
+</ul>
+<p>New shapes are made in one of three modes: Add makes forest, Subtract cuts a clearing, Intersect keeps only the overlap with existing zones. Holding Alt switches to Subtract; Shift and Alt together switch to Intersect. With Snap on, new points are pulled to nearby corners and edges of other zones. Ctrl+Z and Ctrl+Y undo and redo; R changes the random seed.</p>
+<h3>Zones panel</h3>
+<p>Every zone and group is a row with an eye (show or hide), a lock (blocks edits) and a solo button (shows only that row). Rows are dragged onto a group to move them in, double clicked to rename, and right clicked for duplicate, copy and paste settings, make clearing and delete.</p>
+<p>With zones selected: <strong>Merge</strong>, <strong>Subtract</strong> and <strong>Intersect</strong> combine them; <strong>Smooth</strong> and <strong>Simplify</strong> rework the outline; <strong>Grow</strong> and <strong>Shrink</strong> move it in or out by a set number of pixels; <strong>Split with line</strong> cuts a zone along a drawn path.</p>
+<p><strong>Groups</strong> hold zones and carry their own settings. Selecting a group puts the tuning panel in group mode: changes apply to the group's zones and to groups inside it that have not set the same setting themselves. A dot beside a setting marks it as changed in that group. Zones in no group follow the project settings.</p>
+<p>A clearing cuts the group it is in and the groups inside it. A clearing in no group cuts everything. A no-trees mask cuts everything. Clearings and masks are applied after forests, whichever was drawn first.</p>
+<h3>Species strip</h3>
+<p>The strip along the bottom lists tree types. Keys 1 to 9 pick one for the brush and for new forests.</p>
+<h3>Tuning panel</h3>
+<p>Tabs on the right: Theme, Shape, Trees, Colour and light, Ground, Weather, Map and Export.</p>
+<ul>
+<li>The search box finds settings by name, by plain words (for example "bigger trees") and by close misspellings.</li>
+<li><strong>Mixed Tuning</strong> holds a few intent sliders (Denseness, Clumpiness, Edge raggedness, Openness). Each moves several settings together.</li>
+<li><strong>Fine Tuning</strong> holds every individual setting with a tooltip. Changed settings are marked and a reset arrow returns one to its default.</li>
+<li><strong>Compare</strong> (top bar) splits the map: a snapshot on the left, the live forest on the right, so a set of changes can be judged and reverted.</li>
+</ul>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/ui_search.png"><img src="../docs/images/ui_search.png" alt="Settings search" style="max-width: 100%;"></a></p>
+<p><em>Search finds settings from plain words: "bigger trees" lands on Tree size in both Mixed Tuning and Fine Tuning.</em></p>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/ui_fine.png"><img src="../docs/images/ui_fine.png" alt="Fine tuning" style="max-width: 100%;"></a></p>
+<p><em>Fine Tuning on the Colour and light tab, with every setting and a reset arrow for changed ones.</em></p>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/ui_compare.png"><img src="../docs/images/ui_compare.png" alt="Compare mode" style="max-width: 100%;"></a></p>
+<p><em>Compare mode: the snapshot on the left, the live forest on the right, with buttons to take a new snapshot, revert or keep the changes.</em></p>
+<h3>Themes tab</h3>
+<p>Cards for each theme. Picking one sets species colours, ground and haze colours, and the structure that goes with it. Tree types picked by hand stay. The <strong>Satellite Matched</strong> section holds themes built from measurements of real forests (section 7).</p>
+<h3>Map tab</h3>
+<p>An imported picture can sit under the forest as a reference. It is never exported. Options: opacity, position lock, scale bar, a 100 m grid, and a two-point calibration that sets how many map pixels make a metre. The map size is the pixel size of the picture the forest is placed on; exports use map pixels, so a PNG drops in at 0,0.</p>
+<h3>Export</h3>
+<p>Export scale sets the output size (map size times scale). Variants: with shadows, without shadows (<code class="notranslate">_noshadow</code>), shadow only (<code class="notranslate">_shadow</code>). Formats:</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Format</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PNG</td>
+<td>Quick to write; strips are written as they are made, so any size fits in memory.</td>
+</tr>
+<tr>
+<td>PNG, smallest file</td>
+<td>Best compression; slower to write.</td>
+</tr>
+<tr>
+<td>PNG tiles</td>
+<td>A folder of 1024 px tiles named <code class="notranslate">name_xC_yR.png</code> with a <code class="notranslate">name_tiles.json</code> index (columns, rows and each tile's position and size). Written strip by strip.</td>
+</tr>
+<tr>
+<td>WebP, lossless</td>
+<td>Usually under half the PNG size. The whole picture is held in memory, so maps above about 120 million pixels are refused.</td>
+</tr>
+<tr>
+<td>JPEG</td>
+<td>Quality 94, no transparency (blended over white). Same memory limit as WebP.</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<hr>
+<h2>4. Project files</h2>
+<p>Projects are JSON (<code class="notranslate">.treeproj</code>). Fields:</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Field</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">map_w</code>, <code class="notranslate">map_h</code></td>
+<td>Map size in pixels.</td>
+</tr>
+<tr>
+<td><code class="notranslate">shapes</code></td>
+<td>Zones: <code class="notranslate">op</code> (<code class="notranslate">Add</code> or <code class="notranslate">Subtract</code>), <code class="notranslate">points</code>, <code class="notranslate">name</code>, <code class="notranslate">visible</code>, <code class="notranslate">locked</code>, <code class="notranslate">mask</code>, <code class="notranslate">group</code>.</td>
+</tr>
+<tr>
+<td><code class="notranslate">groups</code></td>
+<td>Groups: <code class="notranslate">id</code>, <code class="notranslate">parent</code>, <code class="notranslate">name</code>, <code class="notranslate">visible</code>, <code class="notranslate">locked</code>, <code class="notranslate">collapsed</code>, <code class="notranslate">overrides</code> (a sparse settings object).</td>
+</tr>
+<tr>
+<td><code class="notranslate">gen</code></td>
+<td>Generation settings (section 8).</td>
+</tr>
+<tr>
+<td><code class="notranslate">light</code></td>
+<td>Shadow angle, sun elevation, shadow length and softness, shadows on or off, flat light.</td>
+</tr>
+<tr>
+<td><code class="notranslate">grading</code></td>
+<td>Per-layer and global hue, saturation, brightness, contrast, tint; shadow opacity and colour.</td>
+</tr>
+<tr>
+<td><code class="notranslate">species</code></td>
+<td>Tree species: name, tree type (<code class="notranslate">preset</code>), height, four leaf colours, bark colour, canopy fill.</td>
+</tr>
+<tr>
+<td><code class="notranslate">painted</code>, <code class="notranslate">erased</code></td>
+<td>Brush-placed trees and erased circles.</td>
+</tr>
+<tr>
+<td><code class="notranslate">background_image</code></td>
+<td>Reference picture path, opacity, scale, lock.</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>Settings missing from a file take their defaults, and unknown settings are ignored, so older files open.</p>
+<hr>
+<h2>5. How the picture is made, stage by stage</h2>
+<h3>Overview</h3>
+<ol>
+<li>A distance map is made from the zones.</li>
+<li>Cover and gaps are decided from the distance and from noise.</li>
+<li>Trees are placed.</li>
+<li>Each tree is drawn from a sprite of its type into a height map.</li>
+<li>Shadows are worked out from the height map.</li>
+<li>Each pixel is coloured.</li>
+<li>Ground, haze and shadow layers are added, graded and stacked.</li>
+</ol>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/stages.png"><img src="../docs/images/stages.png" alt="Stages of the picture" style="max-width: 100%;"></a></p>
+<p><em>Left to right: the height map every later stage works from, the shaded trees without cast shadows, and the final picture with shadows and ground.</em></p>
+<p>Placement and drawing into the height map run on the processor (<code class="notranslate">engine.rs</code>). Shading and compositing run on the graphics card when available (<code class="notranslate">gpu/</code>); the processor version is the reference and the fallback. All settings are defined in <code class="notranslate">params.rs</code>.</p>
+<h3>Stage 1: the distance map and the edge</h3>
+<p>The zones are filled into a mask and a signed distance map is made from it: positive inside, negative outside, in map pixels. The distance drives the thinning of cover toward the edge and the pull-in.</p>
+<p>The pull-in keeps the whole forest, fringe and stray trees included, inside the drawn line. It is a constant inset plus a steep depth ramp outside the envelope, and it varies along the outline. The Pull in setting scales it (100% fits exactly). With Contain on, a tree whose crown would cross the line is dropped, so the clip has nothing to cut; shadows are clipped too unless Keep shadows inside is off. Painted trees are exempt.</p>
+<p>Edge patterns (fragmented, branching, clumps, lobed), warp and noise reshape the outline before any of this.</p>
+<h3>Stage 2: cover and gaps</h3>
+<p>Cover is the share of ground crowns occupy. Where trees stand and where clearings fall is decided by layers of fractal noise (<code class="notranslate">noise.rs</code>, <code class="notranslate">field.rs</code>), so patches and holes are irregular. Settings: Coverage, Cover patch size, Edge thinning depth, Gaps, Gap size.</p>
+<h3>Stage 3: placing trees</h3>
+<p>Trees are placed by dart throwing [4]: a random point is kept if it is allowed (cover says so) and not too close to a tree already kept. Closeness is measured in the sizes of the two crowns, so large trees keep more room. Crown radii are drawn between Smallest crown and Largest crown.</p>
+<ul>
+<li><strong>Stable placement.</strong> Each dart draws all of its random numbers up front from a generator seeded by the layer and the dart's index, whether or not the dart lands. A tree's own seed (which picks its sprite variant and orientation) comes from where it stands. A change in one zone changes only the darts in that zone.</li>
+<li><strong>Tree clusters.</strong> With Tree clusters above 0, parent points are spread over the map and the chance of keeping a dart is high near a parent and falls off with distance (a Thomas cluster process [5, 6]). Dart throwing fills every allowed place, so the chance is raised to a power that grows with the strength, which leaves real gaps between groves. Cluster size is the spread of one cluster.</li>
+<li><strong>Crown lean.</strong> Each crown moves away from crowded neighbours toward open space: the push from every neighbour within 1.8 combined radii is summed, weighted by the neighbour's size, and applied up to 0.8 of the tree's own radius at full strength.</li>
+<li><strong>Crown shyness</strong> (<code class="notranslate">shy.rs</code>). Crowns of similar height leave thin channels between them [7]. Each canopy tree gets a squash factor in 24 directions from its neighbours (crowns whose heights differ by more than 30% are left to overlap, and no crown is squashed below 55% of its size). The sprite is pulled in by that factor when stamped, so leaves keep their texture and the channel follows both outlines. Mushrooms are rigid. Gap width sets the channel.</li>
+<li><strong>Canopy weave.</strong> The height of a crown is lifted toward its top so its edge starts high, with a per-pixel jitter. Crowns of similar height then interleave at their edges.</li>
+<li><strong>Other layers.</strong> Shrubs grow where grass is and crowns are not. Lone trees appear in groups in the fringe band outside the forest (a Matérn cluster process [6]). Pebbles are small round bushes and stones near the edge. Mushrooms grow in clusters on open ground, and a share of the canopy can be giant mushrooms.</li>
+<li>A smaller tree is never placed inside a larger crown.</li>
+<li>Species are assigned after placement: the main species everywhere, then a second species in clumps chosen by noise (Mix amount, Mix clump size).</li>
+</ul>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/clusters.png"><img src="../docs/images/clusters.png" alt="Tree clusters" style="max-width: 100%;"></a></p>
+<p><em>Tree clusters at 0, 0.5 and 0.9 on the same zone. Higher values leave open ground between groves.</em></p>
+<h3>Stage 3b: stand age</h3>
+<p>Stand age in years scales the forest from young to old. 0 shows the forest as drawn, which stands for a mature stand. The age is worked into the settings before planning (<code class="notranslate">Project::aged</code> in <code class="notranslate">age.rs</code>).</p>
+<ul>
+<li>Crown size follows a growth curve [13] per tree type: <code class="notranslate">1 - exp(-2t/T)</code>, where T is the years the type needs to reach about 95% of its crown, divided by the same value at 60% of T. A crown is therefore the drawn size at maturity, smaller before, and slowly larger after, to about 1.4 times the drawn size.</li>
+<li>Every type has a largest crown, in metres, in <code class="notranslate">max_crown_radius_m</code> in <code class="notranslate">age.rs</code>. Crowns never exceed it, whatever the age or the crown settings. One generated map pixel stands for 0.45 m at forest size 100%.</li>
+<li><code class="notranslate">years_to_grow</code> in <code class="notranslate">age.rs</code> sets T: 30 for pioneers (aspen, birch, willow, acacia, eucalyptus, bamboo, apple, cherry), 120 for oak, Douglas fir, bald cypress, baobab and banyan, 90 for most conifers, 60 otherwise.</li>
+<li>Young stands have lower cover, more shrubs and less variation in height. Old stands (past about 0.7 to 2.6 times T) gain gaps, wider gaps and a wider spread of heights.</li>
+<li>In a mixed stand each tree type is brought to its own stage from the main type's.</li>
+</ul>
+<p>Adding a tree type to the ageing tables is two lines in <code class="notranslate">age.rs</code>.</p>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/stand_age.png"><img src="../docs/images/stand_age.png" alt="Stand age" style="max-width: 100%;"></a></p>
+<p><em>Stand age 8, 30, 70, 200 and 1500 years on an Eastern Hardwood stand. Crowns grow, level off and stop at the largest size the tree type reaches.</em></p>
+<h3>Stage 4: sprites and the height map</h3>
+<p>Each tree is drawn from a sprite of its type (section 6). Sprites are resampled to the tree's crown radius and stamped into a height map, taller points winning. Each pixel keeps its height, tone, species, the direction its surface faces, how exposed it is, and whether it is leaf or wood. Painted trees are marked so they stay solid wherever placed.</p>
+<h3>Stage 5: shadows</h3>
+<p>For each pixel the highest occluder along the ray toward the sun is found over the combined height map (a horizon search [9]), compared with the receiver's own height, softened near grazing rays and faded with distance, and then blurred by Shadow softness. Each layer receives its own shadow, which allows the shadow-only and no-shadow exports.</p>
+<h3>Stage 6: colour and light</h3>
+<p>Each species has four leaf colours from dark to light. A pixel picks a place along that ramp from its exposure, tone, noise and the tree's own variation, and is multiplied by the light on it.</p>
+<ul>
+<li><strong>Light</strong> combines the angle of the surface to the sun, how high the pixel stands compared with its surroundings (Crown shading), large soft tone patches (Patch tone) and a gamma and gain. A soft knee keeps the brightest leaves from washing out to white; colour past full brightness is scaled down, not clipped.</li>
+<li><strong>Colour variation:</strong> Mottling (patches within a crown), Colour variety, Crown to crown difference, per-tree hue lean (Tree lean) and sun-dappled tops.</li>
+<li><strong>Occlusion</strong> darkens crevices between and under crowns [10]. The height at a pixel is compared with blurred copies of the height map at 3 px, 9 px and crown scale; pixels lower than their surroundings darken. The setting raises the strength of those terms.</li>
+<li><strong>Leaf glow</strong> adds a lighter leaf colour on pixels facing away from the sun that sit low in the crown (thin leaves), scaled by Leaf glow.</li>
+<li><strong>Crown lumps</strong> tilts the surface normal [11] by the slope of the height map at a few pixels, so clumps inside a crown catch the light, not only the dome the sprite supplies.</li>
+<li><strong>Smoothing</strong> is an optional Kuwahara filter [12]: each pixel takes the average of the least varying of four quadrants around it, which flattens crowns into lobes of one tone while keeping outlines crisp. Off by default.</li>
+<li><strong>Snow</strong> clings to upward-facing, high surfaces and covers ground by distance from the edge, along a gradient or everywhere, with patchiness. <strong>Fire</strong> scorches and chars crowns, ashes the ground and can add flames and a glow.</li>
+</ul>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/shading.png"><img src="../docs/images/shading.png" alt="Occlusion, leaf glow and crown lumps" style="max-width: 100%;"></a></p>
+<p><em>The three optional shading terms on the same crowns: none, Occlusion, Leaf glow and Crown lumps.</em></p>
+<h3>Stage 7: ground, haze and layers</h3>
+<p>Grass is drawn from noise with accent patches and flecks in a second colour. Haze is a soft darkening around and under the forest. The layers in order are: haze, ground shadow, grass, shrubs, canopy, lone trees, pebbles. Each is graded separately (hue, saturation, brightness, contrast, tint) and a global grade applies on top. Blurred edge mode replaces the realistic edge with a feathered canopy floor.</p>
+<p>Groups with their own settings are drawn as separate passes (<code class="notranslate">stack.rs</code>): zones in no group share the project settings and are drawn together; each group is drawn with the settings it ends up with and the passes are laid over each other. Neighbouring groups with identical settings and clearings are drawn together.</p>
+<h3>Export</h3>
+<p><code class="notranslate">render.rs</code> renders the map strip by strip (halos around each strip keep shadows and smoothing correct across seams) and hands each strip to a writer: streaming PNG, whole-picture WebP or JPEG, or tiles. Trees are planned once at a bounded grid size, so very large maps keep memory bounded.</p>
+<hr>
+<h2>6. Tree types and the tree lab</h2>
+<h3>How a tree is generated</h3>
+<p>Every tree is grown by a program that follows the Weber and Penn method [1]. A tree is a list of numbers per branching level: how many branches grow, how long they are, the angle they leave at, how much they curve and split. Levels run trunk, branches, twigs, leaves. The implementation in <code class="notranslate">treegen.rs</code> is a port to Rust of Charlie Hewitt's tree-gen [2, 3]; because the original is GPL-3.0, the combined work is GPL-3.0.</p>
+<p>Several variants of every type are grown from different seeds and cached. <code class="notranslate">treegen_sprite.rs</code> draws the branches and leaves from above into a sprite: for every pixel, surface height, the direction the surface faces, tone, how exposed it is, and whether it is leaf or wood. Sprites are resampled to any crown size.</p>
+<p>The raw generator makes sparse trees, fine for a close-up and too thin from above. Each type is therefore grown with a <strong>canopy</strong> setting that changes the generator itself, so every leaf still grows on a branch.</p>
+<h3>The base presets</h3>
+<p><code class="notranslate">treegen_data.rs</code> holds the base presets: <code class="notranslate">acer</code>, <code class="notranslate">apple</code>, <code class="notranslate">balsam_fir</code>, <code class="notranslate">bamboo</code>, <code class="notranslate">black_oak</code>, <code class="notranslate">black_tupelo</code>, <code class="notranslate">cambridge_oak</code>, <code class="notranslate">douglas_fir</code>, <code class="notranslate">european_larch</code>, <code class="notranslate">fan_palm</code>, <code class="notranslate">hill_cherry</code>, <code class="notranslate">lombardy_poplar</code>, <code class="notranslate">palm</code>, <code class="notranslate">quaking_aspen</code>, <code class="notranslate">sassafras</code>, <code class="notranslate">silver_birch</code>, <code class="notranslate">small_pine</code>, <code class="notranslate">sphere_tree</code>, <code class="notranslate">weeping_willow</code>, <code class="notranslate">weeping_willow_o</code>. Their canopy settings are in <code class="notranslate">canopy_for</code> in <code class="notranslate">treegen_sprite.rs</code>.</p>
+<h3>Preset parameters</h3>
+<p>Scalars:</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">shape</code></td>
+<td>Envelope of the whole crown, used to scale branch length by height on the trunk: 0 conical, 1 spherical, 2 hemispherical, 3 cylindrical, 4 tapered cylindrical, 5 flame, 6 inverse conical, 7 tend flame, 8 envelope (set by the <code class="notranslate">prune_*</code> values).</td>
+</tr>
+<tr>
+<td><code class="notranslate">g_scale</code>, <code class="notranslate">g_scale_v</code></td>
+<td>Overall size of the tree in generator units, and its random variation. Leaf size and count are relative to it, so changing it changes how coarse or fine the foliage is at a given crown size.</td>
+</tr>
+<tr>
+<td><code class="notranslate">levels</code></td>
+<td>Number of branching levels (trunk counts as the first), up to 4.</td>
+</tr>
+<tr>
+<td><code class="notranslate">ratio</code></td>
+<td>Trunk radius relative to its length. <code class="notranslate">ratio_power</code> sets how radius falls with branch length at lower levels.</td>
+</tr>
+<tr>
+<td><code class="notranslate">flare</code></td>
+<td>Widening of the trunk base.</td>
+</tr>
+<tr>
+<td><code class="notranslate">base_splits</code></td>
+<td>Number of times the trunk forks near its base (negative gives a random number up to that many).</td>
+</tr>
+<tr>
+<td><code class="notranslate">leaf_blos_num</code></td>
+<td>Leaves (and blossoms) per twig. Negative values scale with the twig.</td>
+</tr>
+<tr>
+<td><code class="notranslate">leaf_shape</code></td>
+<td>1 ovate, 2 linear, 3 cordate, 4 maple, 5 palmate, 6 spiky oak, 7 round oak, 8 elliptic, 9 rectangle, 10 triangle, 11 fan (ginkgo).</td>
+</tr>
+<tr>
+<td><code class="notranslate">leaf_scale</code>, <code class="notranslate">leaf_scale_x</code></td>
+<td>Leaf length relative to the tree, and width relative to length.</td>
+</tr>
+<tr>
+<td><code class="notranslate">leaf_bend</code></td>
+<td>How far leaves turn toward the light.</td>
+</tr>
+<tr>
+<td><code class="notranslate">blossom_shape</code>, <code class="notranslate">blossom_scale</code>, <code class="notranslate">blossom_rate</code></td>
+<td>The same for blossoms; rate is the share of leaves replaced by blossoms.</td>
+</tr>
+<tr>
+<td><code class="notranslate">prune_ratio</code>, <code class="notranslate">prune_width</code>, <code class="notranslate">prune_width_peak</code>, <code class="notranslate">prune_power_low</code>, <code class="notranslate">prune_power_high</code></td>
+<td>Pruning to an envelope: how strongly branches are cut back to it, its width, where it is widest, and how sharply it falls below and above that point.</td>
+</tr>
+<tr>
+<td><code class="notranslate">tropism</code></td>
+<td>Three numbers (x, y, z): growth bends toward this direction as it grows. Positive z bends up, negative z droops (willow uses -3); a sideways value makes wind-bent trees (krummholz).</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>Arrays have four values, one per level (trunk, branches, twigs, leaves-carrying twigs):</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">branches</code></td>
+<td>Number of children per parent (the trunk's first value is 1).</td>
+</tr>
+<tr>
+<td><code class="notranslate">length</code>, <code class="notranslate">length_v</code></td>
+<td>Length as a fraction of the parent (the trunk's is of the tree) and its random variation.</td>
+</tr>
+<tr>
+<td><code class="notranslate">base_size</code></td>
+<td>Bare fraction of a stem before its first children grow.</td>
+</tr>
+<tr>
+<td><code class="notranslate">down_angle</code>, <code class="notranslate">down_angle_v</code></td>
+<td>Angle in degrees between a child and its parent: 0 along the parent, 90 at right angles. A negative variation makes the angle follow the position on the parent instead of being random.</td>
+</tr>
+<tr>
+<td><code class="notranslate">rotate</code>, <code class="notranslate">rotate_v</code></td>
+<td>Angle around the parent between successive children. Positive values spiral by that many degrees; negative values place children opposite one another.</td>
+</tr>
+<tr>
+<td><code class="notranslate">taper</code></td>
+<td>0 a cylinder, 1 a cone, 2 a rounded end; above 2 gives bulges along the stem.</td>
+</tr>
+<tr>
+<td><code class="notranslate">curve_res</code></td>
+<td>Segments per stem. More segments give smoother bends and more places to split or curve.</td>
+</tr>
+<tr>
+<td><code class="notranslate">curve</code>, <code class="notranslate">curve_back</code>, <code class="notranslate">curve_v</code></td>
+<td>Total bend in degrees (negative droops), a second bend for an S shape, and random variation. A negative <code class="notranslate">curve_v</code> makes a helix.</td>
+</tr>
+<tr>
+<td><code class="notranslate">bend_v</code></td>
+<td>Random bend of the whole branch.</td>
+</tr>
+<tr>
+<td><code class="notranslate">seg_splits</code></td>
+<td>Forks per segment (0 none, 1 every segment). <code class="notranslate">split_angle</code>, <code class="notranslate">split_angle_v</code> set the angle and its variation.</td>
+</tr>
+<tr>
+<td><code class="notranslate">branch_dist</code></td>
+<td>Spread of children along the parent.</td>
+</tr>
+<tr>
+<td><code class="notranslate">radius_mod</code></td>
+<td>Radius multiplier per level.</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h3>Canopy parameters</h3>
+<p>Used for every type, in <code class="notranslate">extra_presets.json</code> as <code class="notranslate">canopy</code> and in <code class="notranslate">canopy_for</code> for the base presets. All multiply or add to the generator's own values:</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">leaves</code></td>
+<td>Leaves (and blossoms) per twig.</td>
+</tr>
+<tr>
+<td><code class="notranslate">twigs</code></td>
+<td>Leaf-bearing twigs per branch.</td>
+</tr>
+<tr>
+<td><code class="notranslate">twig_len</code></td>
+<td>Twig length.</td>
+</tr>
+<tr>
+<td><code class="notranslate">leaf_size</code>, <code class="notranslate">leaf_width</code></td>
+<td>Leaf size, and width (capped at as wide as long).</td>
+</tr>
+<tr>
+<td><code class="notranslate">blossom_size</code></td>
+<td>Blossom size.</td>
+</tr>
+<tr>
+<td><code class="notranslate">wood</code></td>
+<td>Thickness of trunk and branches. Lower values hide the wood.</td>
+</tr>
+<tr>
+<td><code class="notranslate">limbs</code></td>
+<td>Number of main limbs the trunk grows.</td>
+</tr>
+<tr>
+<td><code class="notranslate">limb_base</code></td>
+<td>Bare stretch at the base of each limb before it branches.</td>
+</tr>
+<tr>
+<td><code class="notranslate">limb_rise</code></td>
+<td>Degrees the main limbs curve upward along their length: a dome instead of a bowl.</td>
+</tr>
+<tr>
+<td><code class="notranslate">inner</code></td>
+<td>Leaves along the branches below the twigs and the trunk above its base, as a share of a twig's leaf count.</td>
+</tr>
+<tr>
+<td><code class="notranslate">sky</code></td>
+<td>How far each leaf turns its face up to the sky, 0 to 1.</td>
+</tr>
+<tr>
+<td><code class="notranslate">light</code></td>
+<td>How strongly late branches bend toward open sky while they grow, 0 to 1, so the crown fills its own gaps. Types that go lopsided with it get less.</td>
+</tr>
+<tr>
+<td><code class="notranslate">rise</code></td>
+<td>Degrees the twigs curve upward, so foliage rides on top of the limbs.</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>The defaults for a type in the extra table are <code class="notranslate">leaves 2.0, twigs 1.5, twig_len 1.1, leaf_size 1.3, inner 0.4, sky 0.7, light 0.5</code>.</p>
+<h3>Adding a new tree type</h3>
+<ol>
+<li><strong>Choose a base preset</strong> from the list above, the one closest in structure.</li>
+<li><strong>Add an entry</strong> to <code class="notranslate">crates/forest-core/assets/extra_presets.json</code>:</li>
+</ol>
+<div class="highlight highlight-source-json"><pre class="notranslate"><span class="pl-ent">"my_tree"</span>: {
+  <span class="pl-ent">"base"</span>: <span class="pl-s"><span class="pl-pds">"</span>black_oak<span class="pl-pds">"</span></span>,
+  <span class="pl-ent">"preset"</span>: { <span class="pl-ent">"g_scale"</span>: <span class="pl-c1">12.0</span>, <span class="pl-ent">"branches"</span>: [<span class="pl-c1">1</span>, <span class="pl-c1">20</span>, <span class="pl-c1">80</span>, <span class="pl-c1">0</span>], <span class="pl-ent">"length"</span>: [<span class="pl-c1">1</span>, <span class="pl-c1">0.5</span>, <span class="pl-c1">0.3</span>, <span class="pl-c1">0.2</span>], <span class="pl-ent">"tropism"</span>: [<span class="pl-c1">0</span>, <span class="pl-c1">0</span>, <span class="pl-c1">0.3</span>] },
+  <span class="pl-ent">"canopy"</span>: { <span class="pl-ent">"leaves"</span>: <span class="pl-c1">2.0</span>, <span class="pl-ent">"twigs"</span>: <span class="pl-c1">1.5</span>, <span class="pl-ent">"inner"</span>: <span class="pl-c1">0.5</span>, <span class="pl-ent">"light"</span>: <span class="pl-c1">0.5</span> }
+}</pre></div>
+<p><code class="notranslate">preset</code> changes only the listed fields. For an array, listed values replace the first values of the base's array and the rest are kept. <code class="notranslate">canopy</code> changes only the listed values of the default canopy above. Optional fields: <code class="notranslate">"kind": "log"</code> or <code class="notranslate">"stump"</code> for the two direct builders; <code class="notranslate">"roots": {"count": 14, "reach": 1.55, "from": 0.35, "thick": 0.8}</code> for stilt roots (count, reach in crown radii, height on the trunk where they leave as a share of the trunk's height, thickness as a share of the trunk's radius); <code class="notranslate">"crown_scale"</code> to shrink the crown inside its sprite to leave room for roots.<br>
+3. <strong>Preview it</strong> without rebuilding: copy the file, edit the copy, and run</p>
+<pre class="notranslate"><code class="notranslate">python tools/lab_sheet.py sheet.png copy.json my_tree:5f7f5a:1.0
+</code></pre>
+<p>which renders two single trees and a small forest of the type. The argument is <code class="notranslate">name:leafcolour:height</code>. The copy is read through <code class="notranslate">TREE_INATOR_EXTRAS</code> (the environment variable can also be set for the app and <code class="notranslate">forest-cli</code>). <code class="notranslate">canopy_lab</code> (<code class="notranslate">cargo run --release -p forest-core --example canopy_lab</code>) tries canopy settings on one preset and prints how much of each crown is gaps and wood.<br>
+4. <strong>Register the name</strong> in the <code class="notranslate">TREE_TYPES</code> list in <code class="notranslate">crates/forest-core/src/treegen_sprite.rs</code> as <code class="notranslate">("my_tree", "Label in the picker")</code>, so the app's pickers list it.<br>
+5. <strong>Optionally add ageing data</strong> in <code class="notranslate">age.rs</code>: its largest crown radius in metres and its years to grow. Types not listed use 8 m and 60 years.<br>
+6. <strong>Rebuild.</strong> The type is then available as a tree type for any species, in the species strip, in themes and in the brush.</p>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/tree_lab.png"><img src="../docs/images/tree_lab.png" alt="Tree lab sheet" style="max-width: 100%;"></a></p>
+<p><em>Output of <code class="notranslate">tools/lab_sheet.py</code>: two single trees and a small forest for each new tree type (juniper, spired spruce, bald cypress, live oak, umbrella acacia).</em></p>
+<h3>Tuning the numbers</h3>
+<ul>
+<li>Wider crown: raise <code class="notranslate">down_angle[1]</code> toward 90 and <code class="notranslate">length[1]</code>.</li>
+<li>Taller, narrower crown: lower <code class="notranslate">down_angle[1]</code>, raise <code class="notranslate">g_scale</code>, use <code class="notranslate">shape</code> 0 or 5.</li>
+<li>Denser foliage from above: raise canopy <code class="notranslate">leaves</code>, <code class="notranslate">twigs</code> and <code class="notranslate">leaf_size</code> before touching <code class="notranslate">leaf_blos_num</code>.</li>
+<li>Hide wood: lower canopy <code class="notranslate">wood</code>, raise <code class="notranslate">inner</code>.</li>
+<li>Drooping branches: negative <code class="notranslate">curve</code>, negative <code class="notranslate">tropism</code> z.</li>
+<li>Open, spiky outline: lower <code class="notranslate">branches[1]</code> and <code class="notranslate">branches[2]</code>, raise <code class="notranslate">length_v</code>.</li>
+<li>Lopsided crown that leaves gaps: lower canopy <code class="notranslate">light</code>.</li>
+<li>Foliage riding over bare limbs: raise canopy <code class="notranslate">rise</code> and <code class="notranslate">limb_rise</code>.</li>
+</ul>
+<p>Dead trees (<code class="notranslate">dead.rs</code>) are living trees whose geometry is damaged in stages that follow the five snag decay classes [8]: fine twigs go first, then small branches, then larger limbs snap and leave stubs, then the top breaks off. A stag-headed tree has a bare outer and upper crown over a green inner crown. Burnt types char the wood and leave less of it.</p>
+<hr>
+<h2>7. Themes</h2>
+<p>A theme is a set of species colours, a ground colour, a haze colour and optional structure settings.</p>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/themes_sheet.png"><img src="../docs/images/themes_sheet.png" alt="Theme gallery" style="max-width: 100%;"></a></p>
+<p><em>Output of <code class="notranslate">tools/all_themes_sheet.py</code>: six satellite matched themes (top rows) and plain themes on the same forest.</em> Picking a theme (<code class="notranslate">Project::apply_theme</code> in <code class="notranslate">params.rs</code>) adds its species, selects them for the main, mix and shrub slots, and sets the colours. A slot that was a hand-picked tree type keeps its type and takes the theme's colours.</p>
+<h3>Plain themes</h3>
+<p>Defined in <code class="notranslate">base_themes()</code> in <code class="notranslate">params.rs</code>: a name, a note, three species (colour ramp, tree type, height), a mix amount, and ground, accent and haze colours. Each also takes a share of the structure of a measured forest according to <code class="notranslate">assets/natural_looks.json</code>:</p>
+<div class="highlight highlight-source-json"><pre class="notranslate"><span class="pl-ent">"Feywild"</span>: { <span class="pl-ent">"from"</span>: <span class="pl-s"><span class="pl-pds">"</span>Eastern Hardwood<span class="pl-pds">"</span></span>, <span class="pl-ent">"strength"</span>: <span class="pl-c1">0.5</span>, <span class="pl-ent">"layout"</span>: <span class="pl-c1">0.6</span>, <span class="pl-ent">"tone"</span>: <span class="pl-c1">0.6</span>, <span class="pl-ent">"sat"</span>: <span class="pl-c1">0.95</span>, <span class="pl-ent">"val"</span>: <span class="pl-c1">1.0</span>, <span class="pl-ent">"crown"</span>: <span class="pl-c1">1.1</span> }</pre></div>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Field</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">from</code></td>
+<td>The satellite matched theme it borrows from.</td>
+</tr>
+<tr>
+<td><code class="notranslate">strength</code></td>
+<td>Share (0 to 1) of that stand's look taken: crown variation, shading, weave, occlusion, glow, lumps, leaf styling.</td>
+</tr>
+<tr>
+<td><code class="notranslate">layout</code></td>
+<td>Share of its layout taken: gaps, gap size, cover patch size, shrub and grass density, crown lean, crown sizes.</td>
+</tr>
+<tr>
+<td><code class="notranslate">tone</code></td>
+<td>Share of its lightness and hue steps laid over the theme's own colours, so any palette varies the way real canopy does. Value is moved toward the stand's, saturation is capped, hue shifts between dark and lit leaves.</td>
+</tr>
+<tr>
+<td><code class="notranslate">sat</code>, <code class="notranslate">val</code></td>
+<td>Muting and darkening of the theme's colours.</td>
+</tr>
+<tr>
+<td><code class="notranslate">crown</code></td>
+<td>Crown size relative to the stand's.</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>A theme without an entry uses <code class="notranslate">default</code>. <code class="notranslate">theme_canopy</code> in <code class="notranslate">params.rs</code> sets the cover for themes made of bare or sparse trees.</p>
+<h3>Satellite matched themes</h3>
+<p>Built from measurements of real forests and stored in <code class="notranslate">assets/satellite_themes.json</code>, one entry per theme:</p>
+<div class="highlight highlight-source-json"><pre class="notranslate"><span class="pl-ent">"Aspen Stand"</span>: { <span class="pl-ent">"note"</span>: <span class="pl-s"><span class="pl-pds">"</span>...<span class="pl-pds">"</span></span>, <span class="pl-ent">"order"</span>: <span class="pl-c1">0</span>, <span class="pl-ent">"mix_amount"</span>: <span class="pl-c1">0.12</span>,
+  <span class="pl-ent">"species"</span>: [ { <span class="pl-ent">"name"</span>: <span class="pl-s"><span class="pl-pds">"</span>...<span class="pl-pds">"</span></span>, <span class="pl-ent">"preset"</span>: <span class="pl-s"><span class="pl-pds">"</span>quaking_aspen<span class="pl-pds">"</span></span>, <span class="pl-ent">"height"</span>: <span class="pl-c1">1.0</span>, <span class="pl-ent">"ramp"</span>: [[<span class="pl-ii">r,g,b</span>] <span class="pl-ii">x 4</span>], <span class="pl-ent">"bark"</span>: [<span class="pl-ii">r,g,b</span>] }, <span class="pl-ii">... three species </span>],
+  <span class="pl-ent">"grass"</span>: [<span class="pl-ii">r,g,b</span>], <span class="pl-ent">"accent"</span>: [<span class="pl-ii">r,g,b</span>], <span class="pl-ent">"haze"</span>: [<span class="pl-ii">r,g,b</span>],
+  <span class="pl-ent">"gen"</span>: { <span class="pl-ent">"crown_max"</span>: <span class="pl-c1">9.8</span>, <span class="pl-ent">"crown_min"</span>: <span class="pl-c1">5.9</span>, <span class="pl-ent">"canopy_cover"</span>: <span class="pl-c1">0.69</span>, <span class="pl-ent">"gaps"</span>: <span class="pl-c1">0.2</span>, <span class="pl-ent">"depth"</span>: { <span class="pl-ii">... </span>}, <span class="pl-ent">"leaf"</span>: { <span class="pl-ii">... </span>} } }</pre></div>
+<p><code class="notranslate">order</code> sets the position in the Satellite Matched section. <code class="notranslate">gen</code> is merged into the project's generation settings when the theme is picked.</p>
+<p>How a stand is measured:</p>
+<ol>
+<li>A stand of the forest type is chosen.</li>
+<li>Aerial lidar gives canopy height at 1 m. From it come crown size, cover, gap size and frequency, and height variation.</li>
+<li>Where available, hyperspectral reflectance gives true colour without a camera's tone curve or haze. The scene is separated into sunlit crown, shaded crown, sunlit ground and shaded ground [14], using the lidar and the sun angle from the flight record, so shadow is never mistaken for foliage.</li>
+<li>An automatic search changes the engine's settings until its render, measured in the same way, matches the stand.</li>
+</ol>
+<p><a target="_blank" rel="noopener noreferrer" href="docs/images/real_vs_render.png"><img src="../docs/images/real_vs_render.png" alt="Real stands next to the engine" style="max-width: 100%;"></a></p>
+<p><em>Real hyperspectral imagery (left four) beside renders of the matched settings (right four), for eastern hardwood, bottomland swamp, tropical rainforest and spruce-fir stands.</em></p>
+<p>Rules that hold for every theme:</p>
+<ul>
+<li>A theme never changes the forest size setting. The theme's own crown sizes carry the proportions, so trees are in scale with each other and the forest size slider stays free for creative use. The scale is 0.45 m per map pixel: the default medium crown, about 13.5 px in radius, stands for a broadleaf tree of about 6 m crown radius.</li>
+<li>One exposure is used for the hyperspectral colour of every stand, and the brightest few percent of leaf pixels are left out of each palette, because camera exposure and glare from wet leaves distort brightness.</li>
+<li>Where a stand shows no bare ground, the ground colour is the standard grass colour (70, 86, 40).</li>
+<li>Smoothing is not used.</li>
+</ul>
+<p>Data used: NEON aerial lidar, camera mosaics and hyperspectral reflectance across the USA [15, 16, 17]; NASA G-LiHT lidar and photos of the El Yunque rainforest, Puerto Rico [18]; aerial photos of Japanese bamboo groves from the Geospatial Information Authority of Japan [19], where no lidar or hyperspectral data is available, so that theme is matched from photos alone; LANDFIRE land cover, for choosing tiles [20].</p>
+<h3>Adding a theme</h3>
+<ol>
+<li>For a plain theme, add a <code class="notranslate">Theme { ... }</code> to <code class="notranslate">base_themes()</code> and, optionally, an entry in <code class="notranslate">natural_looks.json</code>. For a satellite matched theme, add an entry to <code class="notranslate">satellite_themes.json</code>.</li>
+<li>Bake its card picture and regenerate the card list:</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">python tools/bake_theme_cards.py          # new themes only
+FORCE=1 python tools/bake_theme_cards.py  # all themes (set the variable in the shell's own syntax)
+</code></pre>
+<p>This renders each theme on a standard layout with <code class="notranslate">forest-cli</code>, writes <code class="notranslate">crates/tree-inator/assets/themes/&lt;slug&gt;.png</code> and regenerates <code class="notranslate">crates/tree-inator/src/app/theme_cards.rs</code>. <code class="notranslate">forest-cli</code> must be built first.<br>
+3. Rebuild.</p>
+<hr>
+<h2>8. Settings reference</h2>
+<p>Settings live in <code class="notranslate">gen</code> in the project file and are listed in <code class="notranslate">crates/tree-inator/src/app/tuning.rs</code>, one row each (<code class="notranslate">path</code>, label, tab, group, kind, range, tooltip, search aliases). A new setting needs a field in <code class="notranslate">GenParams</code> (<code class="notranslate">params.rs</code>) with a default, a row in <code class="notranslate">tuning.rs</code>, and use in the engine. Shading settings used on the graphics card also need an entry in the parameter list in <code class="notranslate">gpu/mod.rs</code> and use in <code class="notranslate">gpu/kernels.wgsl</code>.</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Area</th>
+<th>Settings (path in <code class="notranslate">gen</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Shape</td>
+<td><code class="notranslate">contain</code>, <code class="notranslate">contain_fit</code>, <code class="notranslate">contain_clip</code>, <code class="notranslate">contain_shadows</code>, <code class="notranslate">edge_mode</code>, <code class="notranslate">feather</code>, <code class="notranslate">shape_softness</code>, <code class="notranslate">edge_warp</code>, <code class="notranslate">edge_noise</code>, <code class="notranslate">pattern</code>, <code class="notranslate">pattern_strength</code></td>
+</tr>
+<tr>
+<td>Size</td>
+<td><code class="notranslate">scale</code> (forest size), <code class="notranslate">crown_min</code>, <code class="notranslate">crown_max</code>, <code class="notranslate">age</code> (stand age in years)</td>
+</tr>
+<tr>
+<td>Density</td>
+<td><code class="notranslate">canopy_cover</code>, <code class="notranslate">canopy_patch_size</code>, <code class="notranslate">canopy_edge_depth</code>, <code class="notranslate">gaps</code>, <code class="notranslate">gap_size</code>, <code class="notranslate">clump</code>, <code class="notranslate">clump_size</code>, <code class="notranslate">shrub_density</code>, <code class="notranslate">lone_groups</code>, <code class="notranslate">lone_reach</code>, <code class="notranslate">interior_lone</code>, <code class="notranslate">pebbles</code></td>
+</tr>
+<tr>
+<td>Crowns</td>
+<td><code class="notranslate">crown_lean</code>, <code class="notranslate">crown_shyness</code>, <code class="notranslate">shyness_gap</code>, <code class="notranslate">shyness_giants_only</code>, <code class="notranslate">depth.weave</code>, <code class="notranslate">depth.smooth</code></td>
+</tr>
+<tr>
+<td>Species</td>
+<td><code class="notranslate">main_species</code>, <code class="notranslate">mix_species</code>, <code class="notranslate">shrub_species</code>, <code class="notranslate">mix_amount</code>, <code class="notranslate">mix_scale</code></td>
+</tr>
+<tr>
+<td>Colour and light</td>
+<td><code class="notranslate">leaf.variety</code>, <code class="notranslate">leaf.mottling</code>, <code class="notranslate">leaf.mottle_size</code>, <code class="notranslate">leaf.dappled</code>, <code class="notranslate">leaf.tree_lean</code>, <code class="notranslate">depth.crown_tone</code>, <code class="notranslate">depth.crown_tone_size</code>, <code class="notranslate">depth.crown_shade</code>, <code class="notranslate">depth.shade_radius</code>, <code class="notranslate">depth.height_var</code>, <code class="notranslate">depth.cluster_tone</code>, <code class="notranslate">depth.depth_strength</code>, <code class="notranslate">depth.gamma</code>, <code class="notranslate">depth.gain</code>, <code class="notranslate">depth.crown_var</code>, <code class="notranslate">depth.canopy_ao</code>, <code class="notranslate">depth.translucency</code>, <code class="notranslate">depth.lumps</code></td>
+</tr>
+<tr>
+<td>Ground</td>
+<td><code class="notranslate">grass_density</code>, <code class="notranslate">grass_reach</code>, <code class="notranslate">grass_color</code>, <code class="notranslate">grass_accent</code>, <code class="notranslate">haze_opacity</code>, <code class="notranslate">haze_reach</code>, <code class="notranslate">haze_color</code></td>
+</tr>
+<tr>
+<td>Weather</td>
+<td><code class="notranslate">snow.*</code>, <code class="notranslate">fire.*</code></td>
+</tr>
+<tr>
+<td>Mushrooms</td>
+<td><code class="notranslate">mushrooms</code>, <code class="notranslate">mushroom_mix</code>, <code class="notranslate">giant_mushrooms</code></td>
+</tr>
+<tr>
+<td>Light (<code class="notranslate">light</code>)</td>
+<td><code class="notranslate">shadow_angle</code>, <code class="notranslate">elevation</code>, <code class="notranslate">shadow_length</code>, <code class="notranslate">shadow_softness</code>, <code class="notranslate">shadows</code>, <code class="notranslate">flat</code></td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<hr>
+<h2>9. Tools folder</h2>
+<p>Small Python scripts (Python 3 with Pillow). All expect a built <code class="notranslate">target/release/forest-cli.exe</code>.</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Script</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">lab_sheet.py OUT.png TABLE.json name:RRGGBB[:height] ...</code></td>
+<td>Single trees and a forest of each type from a tree table, for tuning tree types. <code class="notranslate">-</code> as the table uses the built-in one.</td>
+</tr>
+<tr>
+<td><code class="notranslate">all_themes_sheet.py OUT.png [project] [scale] [theme ...]</code></td>
+<td>Every theme (or the named ones) on the same forest in one labelled sheet.</td>
+</tr>
+<tr>
+<td><code class="notranslate">variants_sheet.py OUT.png THEME SCALE 'label={json patch}' ...</code></td>
+<td>The same forest with different settings side by side. With <code class="notranslate">AFTER=1</code> the patches are applied after the theme. <code class="notranslate">BASE</code> picks the project and <code class="notranslate">CROP</code> (as fractions <code class="notranslate">x0,y0,x1,y1</code>) crops.</td>
+</tr>
+<tr>
+<td><code class="notranslate">bake_theme_cards.py</code></td>
+<td>Bakes the theme card pictures (section 7).</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p><code class="notranslate">tools/sample_projects/</code> holds small projects for these scripts.</p>
+<h3>Examples</h3>
+<p>Each command produced one of the pictures above. PowerShell needs the double quotes inside JSON escaped with a backslash; a POSIX shell takes the same text in plain single quotes without the backslashes.</p>
+<pre class="notranslate"><code class="notranslate"># tree lab: single trees and a forest for each type
+python tools\lab_sheet.py docs\images\tree_lab.png - juniper:5f7f5a:0.9 spruce:2f5238:1.4 bald_cypress:5a7a3a:1.3 live_oak:4f6b3a:1.0 umbrella_acacia:7f8a4a:0.8
+
+# try an edited copy of the tree table instead of the built-in one
+copy crates\forest-core\assets\extra_presets.json my_trees.json
+python tools\lab_sheet.py sheet.png my_trees.json my_tree:5f7f5a:1.0
+
+# theme gallery: the named themes on one forest, 0.45 scale
+python tools\all_themes_sheet.py docs\images\themes_sheet.png tools\sample_projects\sheet_project.json 0.45 "Aspen Stand" "Oak Savanna" Temperate Feywild
+
+# every theme (no names given)
+python tools\all_themes_sheet.py all_themes.png tools\sample_projects\sheet_project.json 0.3
+
+# stand age, one render per value, applied after the theme (AFTER=1), cropped to the middle (CROP)
+$env:BASE='tools\sample_projects\blob_project.json'; $env:AFTER='1'; $env:CROP='0.2,0.2,0.8,0.8'
+python tools\variants_sheet.py docs\images\stand_age.png "Eastern Hardwood" 1.2 'Age 8={\"gen\":{\"age\":8}}' 'Age 70={\"gen\":{\"age\":70}}' 'Age 1500={\"gen\":{\"age\":1500}}'
+
+# shading terms compared on the same crowns
+$env:CROP='0.35,0.35,0.6,0.62'
+python tools\variants_sheet.py docs\images\shading.png "Eastern Hardwood" 3 'Off={\"gen\":{\"canopy_cover\":1.0}}' 'Occlusion={\"gen\":{\"canopy_cover\":1.0,\"depth\":{\"canopy_ao\":1.5}}}'
+
+# theme cards: new themes only, then all of them
+python tools\bake_theme_cards.py
+$env:FORCE='1'; python tools\bake_theme_cards.py
+</code></pre>
+<p><code class="notranslate">variants_sheet.py</code> merges each patch into the base project before the theme unless <code class="notranslate">AFTER=1</code> is set; a patch to <code class="notranslate">crown_min</code>, <code class="notranslate">crown_max</code> or other settings a theme also sets needs <code class="notranslate">AFTER=1</code> to take effect. The base project is <code class="notranslate">BASE</code> (default <code class="notranslate">tools/sample_projects/sheet_project.json</code>).</p>
+<hr>
+<h2>10. References</h2>
+<p>Each source below contains the method or data named after it.</p>
+<p><strong>Tree generation</strong></p>
+<ol>
+<li>Weber, J. and Penn, J. (1995). Creation and rendering of realistic trees. <em>Proceedings of SIGGRAPH '95</em>, 119 to 128. <a href="https://doi.org/10.1145/218380.218427" rel="nofollow">https://doi.org/10.1145/218380.218427</a> (PDF: <a href="https://courses.cs.duke.edu/fall02/cps124/resources/p119-weber.pdf" rel="nofollow">https://courses.cs.duke.edu/fall02/cps124/resources/p119-weber.pdf</a>). Used for the parametric branching model: the per-level parameter arrays, crown shape envelopes, pruning and tropism.</li>
+<li>Hewitt, C. (2017). <em>Procedural generation of tree models for use in computer graphics</em>. Computer Science Tripos Part II dissertation, University of Cambridge. <a href="https://chewitt.me/Papers/CTH-Dissertation-2017.pdf" rel="nofollow">https://chewitt.me/Papers/CTH-Dissertation-2017.pdf</a>. Used for the description of the Weber and Penn implementation that <code class="notranslate">treegen.rs</code> follows.</li>
+<li>Hewitt, C. tree-gen (code, GPL-3.0). <a href="https://github.com/friggog/tree-gen">https://github.com/friggog/tree-gen</a>. The generator and base presets that <code class="notranslate">treegen.rs</code> and <code class="notranslate">treegen_data.rs</code> port.</li>
+</ol>
+<p><strong>Placement</strong></p>
+<ol start="4">
+<li>Cook, R. L. (1986). Stochastic sampling in computer graphics. <em>ACM Transactions on Graphics</em> 5(1), 51 to 72. <a href="https://doi.org/10.1145/7529.8927" rel="nofollow">https://doi.org/10.1145/7529.8927</a>. Used for dart throwing: keep a random point only if it is a minimum distance from the points already kept.</li>
+<li>Thomas, M. (1949). A generalization of Poisson's binomial limit for use in ecology. <em>Biometrika</em> 36(1 to 2), 18 to 25. <a href="https://doi.org/10.1093/biomet/36.1-2.18" rel="nofollow">https://doi.org/10.1093/biomet/36.1-2.18</a>. Used for the cluster process behind Tree clusters: parents spread at random with offspring scattered around them.</li>
+<li>Illian, J., Penttinen, A., Stoyan, H. and Stoyan, D. (2008). <em>Statistical Analysis and Modelling of Spatial Point Patterns</em>. Wiley. <a href="https://doi.org/10.1002/9780470725160" rel="nofollow">https://doi.org/10.1002/9780470725160</a>. Used for the Thomas and Matérn cluster processes (Tree clusters, lone tree groups).</li>
+<li>Putz, F. E., Parker, G. G. and Archibald, R. M. (1984). Mechanical abrasion and intercrown spacing. <em>American Midland Naturalist</em> 112(1), 24 to 28. <a href="https://doi.org/10.2307/2425452" rel="nofollow">https://doi.org/10.2307/2425452</a>. Used for the crown shyness phenomenon: empty channels between neighbouring crowns of similar height.</li>
+<li>Cline, S. P., Berg, A. B. and Wight, H. M. (1980). Snag characteristics and dynamics in Douglas-fir forests, western Oregon. <em>Journal of Wildlife Management</em> 44(4), 773 to 786. <a href="https://doi.org/10.2307/3808305" rel="nofollow">https://doi.org/10.2307/3808305</a>. Used for the five decay classes of standing dead trees that dead tree stages follow.</li>
+</ol>
+<p><strong>Shading and filtering</strong></p>
+<ol start="9">
+<li>Max, N. L. (1988). Horizon mapping: shadows for bump-mapped surfaces. <em>The Visual Computer</em> 4(2), 109 to 117. <a href="https://doi.org/10.1007/BF01905562" rel="nofollow">https://doi.org/10.1007/BF01905562</a>. Used for shadows from a height field by finding the highest occluder toward the light.</li>
+<li>Luft, T., Colditz, C. and Deussen, O. (2006). Image enhancement by unsharp masking the depth buffer. <em>ACM Transactions on Graphics</em> 25(3), 1206 to 1213. <a href="https://doi.org/10.1145/1141911.1142016" rel="nofollow">https://doi.org/10.1145/1141911.1142016</a>. Used for darkening by the difference between a height or depth map and a blurred copy of it (Occlusion).</li>
+<li>Blinn, J. F. (1978). Simulation of wrinkled surfaces. <em>Computer Graphics (SIGGRAPH '78)</em> 12(3), 286 to 292. <a href="https://doi.org/10.1145/965139.507101" rel="nofollow">https://doi.org/10.1145/965139.507101</a>. Used for perturbing the surface normal by the slope of a height field (Crown lumps).</li>
+<li>Papari, G., Petkov, N. and Campisi, P. (2007). Artistic edge and corner enhancing smoothing. <em>IEEE Transactions on Image Processing</em> 16(10), 2449 to 2462. <a href="https://doi.org/10.1109/TIP.2007.903912" rel="nofollow">https://doi.org/10.1109/TIP.2007.903912</a>. Used for the Kuwahara filter and its generalisation (Smoothing).</li>
+</ol>
+<p><strong>Growth</strong></p>
+<ol start="13">
+<li>Richards, F. J. (1959). A flexible growth function for empirical use. <em>Journal of Experimental Botany</em> 10(2), 290 to 301. <a href="https://doi.org/10.1093/jxb/10.2.290" rel="nofollow">https://doi.org/10.1093/jxb/10.2.290</a>. Used for the family of growth curves that includes the monomolecular curve behind Stand age.</li>
+</ol>
+<p><strong>Measuring real stands</strong></p>
+<ol start="14">
+<li>Li, X. and Strahler, A. H. (1985). Geometric-optical modeling of a conifer forest canopy. <em>IEEE Transactions on Geoscience and Remote Sensing</em> GE-23(5), 705 to 721. <a href="https://doi.org/10.1109/TGRS.1985.289389" rel="nofollow">https://doi.org/10.1109/TGRS.1985.289389</a>. Used for the scene as four components: sunlit crown, shaded crown, sunlit ground and shaded ground.</li>
+</ol>
+<p><strong>Data</strong></p>
+<ol start="15">
+<li>NEON. Spectrometer orthorectified surface directional reflectance, mosaic (DP3.30006.001). <a href="https://data.neonscience.org/data-products/DP3.30006.001" rel="nofollow">https://data.neonscience.org/data-products/DP3.30006.001</a>. Hyperspectral colour of the older flights.</li>
+<li>NEON. Spectrometer orthorectified surface bidirectional reflectance, mosaic (DP3.30006.002). <a href="https://data.neonscience.org/data-products/DP3.30006.002" rel="nofollow">https://data.neonscience.org/data-products/DP3.30006.002</a>. Hyperspectral colour of flights from 2022 on.</li>
+<li>NEON. Ecosystem structure, canopy height model (DP3.30015.001). <a href="https://data.neonscience.org/data-products/DP3.30015.001" rel="nofollow">https://data.neonscience.org/data-products/DP3.30015.001</a>. Canopy height at 1 m. NEON program: <a href="https://www.neonscience.org/" rel="nofollow">https://www.neonscience.org/</a>.</li>
+<li>NASA G-LiHT canopy height model V001. <a href="https://lpdaac.usgs.gov/products/glchmtv001/" rel="nofollow">https://lpdaac.usgs.gov/products/glchmtv001/</a>, and aerial orthomosaic V001. <a href="https://lpdaac.usgs.gov/products/glorthov001/" rel="nofollow">https://lpdaac.usgs.gov/products/glorthov001/</a>. Lidar heights and photos of El Yunque, Puerto Rico. Project: <a href="https://gliht.gsfc.nasa.gov/" rel="nofollow">https://gliht.gsfc.nasa.gov/</a>.</li>
+<li>Geospatial Information Authority of Japan, seamless aerial photo tiles (<code class="notranslate">https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg</code>, zoom 14 to 18; credit "Geospatial Information Authority of Japan tiles"). Terms and tile list: <a href="https://maps.gsi.go.jp/development/ichiran.html" rel="nofollow">https://maps.gsi.go.jp/development/ichiran.html</a>. Photos of the bamboo groves.</li>
+<li>LANDFIRE. <a href="https://landfire.gov/" rel="nofollow">https://landfire.gov/</a>. Land cover used to choose which tile of a forest type to study.</li>
+</ol></article></div></body></html>

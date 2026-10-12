@@ -87,7 +87,7 @@ fn every_theme_and_tree_type_renders_and_survives_a_round_trip() {
         assert_eq!(back.species.len(), p.species.len(), "{}", t.name);
         // the theme's species have tree types that exist
         for sp in &t.species {
-            if let Some(ty) = sp.tree_type(true) {
+            if let Some(ty) = sp.tree_type() {
                 assert!(treegen::preset_by_name(ty).is_some() || dead::is_dead(ty), "{}: {ty}", t.name);
             }
         }

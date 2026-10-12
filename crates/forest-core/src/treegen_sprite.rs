@@ -6,7 +6,7 @@
 //! sky. Nothing is painted in afterwards.
 
 use crate::treegen::{generate, preset_by_name, Canopy, Poly, Rand, TreeGeo, V};
-use crate::wp::Sprite;
+use crate::sprite::Sprite;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -55,6 +55,11 @@ pub const TREE_TYPES: &[(&str, &str)] = &[
     ("joshua_tree", "Joshua tree"),
     ("krummholz", "Krummholz, wind-bent pine"),
     ("eucalyptus", "Eucalyptus"),
+    ("juniper", "Juniper"),
+    ("spruce", "Spruce, spired"),
+    ("bald_cypress", "Bald cypress"),
+    ("live_oak", "Live oak, spreading"),
+    ("umbrella_acacia", "Umbrella acacia"),
     ("ginkgo", "Ginkgo"),
     ("fallen_log", "Fallen log"),
     ("stump", "Stump"),
@@ -179,7 +184,7 @@ impl Raster {
 
     /// A tapered capsule between two points, drawn per pixel.
     #[allow(clippy::too_many_arguments)]
-    fn capsule(&mut self, a: [f32; 2], b: [f32; 2], za: f32, zb: f32, ra: f32, rb: f32, dome: f32, tone: f32, round: f32) {
+    fn capsule(&mut self, a: [f32; 2], b: [f32; 2], za: f32, zb: f32, ra: f32, rb: f32, dome: f32, tone: f32, round: f32, cls: u8) {
         let rmax = ra.max(rb);
         let min_x = (a[0].min(b[0]) - rmax).floor().max(0.0) as i32;
         let max_x = ((a[0].max(b[0]) + rmax).ceil() as i32).min(self.size as i32 - 1);
@@ -206,7 +211,7 @@ impl Raster {
                     self.nx[i] = ox / r.max(1e-6) * round;
                     self.ny[i] = oy / r.max(1e-6) * round;
                     self.tone[i] = tone;
-                    self.cls[i] = 2;
+                    self.cls[i] = cls;
                 }
             }
         }
@@ -435,6 +440,12 @@ fn built_geometry(preset_name: &str, variant: u32, canopy: &Canopy) -> Option<Ar
     b
 }
 
+/// Conifers and other dense needled crowns draw their branches as the darkest foliage, so no bare wood shows
+/// between the needle masses.
+fn hides_wood(name: &str) -> bool {
+    matches!(name, "balsam_fir" | "douglas_fir" | "small_pine" | "european_larch") || crate::extra::find(name).is_some_and(|e| e.hide_wood)
+}
+
 fn make_geometry(preset_name: &str, variant: u32, canopy: &Canopy) -> Option<Built> {
     let dead = crate::dead::style(preset_name);
     let extra = crate::extra::find(preset_name);
@@ -484,6 +495,7 @@ pub fn build_sprite_with(preset_name: &str, variant: u32, canopy: &Canopy, r0: f
     // branches first, then leaves over them (the z buffer sorts the rest out)
     let kpx = r0s as f64 * vw.k;
     let min_r = if dead { 0.8 } else { 0.55 } * SS as f32;
+    let hidden = hides_wood(preset_name) && !dead;
     for (si, (level, pts)) in geo.splines.iter().enumerate().filter(|_| !fan) {
         let n = if *level <= 1 { 3 } else { 1 };
         for (w_index, w) in pts.windows(2).enumerate() {
@@ -504,7 +516,7 @@ pub fn build_sprite_with(preset_name: &str, variant: u32, canopy: &Canopy, r0: f
                 };
                 // a stem seen end on, such as a broken trunk, shows a flat top rather than a rounded one
                 let flat = dead && ((pb[0] - pa[0]).powi(2) + (pb[1] - pa[1]).powi(2)).sqrt() < 0.5 * ra.max(rb);
-                r.capsule(pa, pb, za, zb, ra, rb, (ra.max(rb) / r0s) * 0.5, tone, if flat { 0.25 } else { 0.8 });
+                r.capsule(pa, pb, za, zb, ra, rb, (ra.max(rb) / r0s) * 0.5, if hidden { 0.08 } else { tone }, if flat { 0.25 } else { 0.8 }, if hidden { 1 } else { 2 });
                 prev = q;
                 prev_r = rr;
             }

@@ -1,11 +1,13 @@
 //! Forest generation engine. No UI, no windowing.
 
+pub mod age;
 pub mod brush;
 pub mod compose;
 pub mod dead;
 pub mod engine;
 pub mod extra;
 pub mod field;
+pub mod geom;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 pub mod groups;
@@ -14,11 +16,12 @@ pub mod noise;
 pub mod params;
 pub mod render;
 pub mod rng;
+pub mod smooth;
+pub mod sprite;
 pub mod stack;
 pub mod treegen;
 pub mod treegen_data;
 pub mod treegen_sprite;
-pub mod wp;
 
 pub use brush::{erase_dab, paint_dab, stamp_one, BrushMode, BrushSettings};
 pub use compose::{compose, ComposeOptions};

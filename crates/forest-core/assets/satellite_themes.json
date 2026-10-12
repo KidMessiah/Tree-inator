@@ -1,0 +1,2466 @@
+{
+ "Aspen Stand": {
+  "note": "Quaking aspen stand, from Wisconsin lidar and hyperspectral imagery",
+  "mix_amount": 0.12,
+  "species": [
+   {
+    "name": "Quaking Aspen",
+    "preset": "quaking_aspen",
+    "height": 1.0,
+    "ramp": [
+     [
+      71,
+      98,
+      68
+     ],
+     [
+      91,
+      125,
+      79
+     ],
+     [
+      106,
+      145,
+      89
+     ],
+     [
+      126,
+      168,
+      100
+     ]
+    ],
+    "bark": [
+     205,
+     198,
+     180
+    ]
+   },
+   {
+    "name": "Balsam Fir",
+    "preset": "balsam_fir",
+    "height": 1.2,
+    "ramp": [
+     [
+      24,
+      44,
+      34
+     ],
+     [
+      38,
+      64,
+      46
+     ],
+     [
+      56,
+      86,
+      60
+     ],
+     [
+      78,
+      108,
+      76
+     ]
+    ],
+    "bark": [
+     70,
+     56,
+     44
+    ]
+   },
+   {
+    "name": "Hazel Shrub",
+    "preset": "black_oak",
+    "height": 0.5,
+    "ramp": [
+     [
+      38,
+      52,
+      36
+     ],
+     [
+      48,
+      67,
+      42
+     ],
+     [
+      56,
+      77,
+      48
+     ],
+     [
+      68,
+      89,
+      53
+     ]
+    ],
+    "bark": [
+     70,
+     56,
+     44
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   78,
+   46
+  ],
+  "accent": [
+   92,
+   96,
+   56
+  ],
+  "haze": [
+   44,
+   52,
+   34
+  ],
+  "gen": {
+   "crown_max": 9.777777777777777,
+   "crown_min": 5.866666666666666,
+   "canopy_cover": 0.7718348121995278,
+   "gaps": 0.529407060133472,
+   "gap_size": 35.71321200267319,
+   "canopy_patch_size": 123.41726244653445,
+   "shrub_density": 0.6385927178012892,
+   "grass_density": 0.7729215398791323,
+   "haze_opacity": 0.05478646716316245,
+   "depth": {
+    "gain": 0.8963883205619219,
+    "gamma": 0.5803838257552455,
+    "crown_tone": 0.5,
+    "crown_shade": 0.997529646686065,
+    "height_var": 0.6549606895795892,
+    "cluster_tone": 0.2311588996765677,
+    "crown_var": 0.12,
+    "depth_strength": 1.4419051038978863,
+    "shade_radius": 14.842220890032008,
+    "crown_tone_size": 153.6608305963653,
+    "weave": 0.0013308238310257075,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.3820503698362825,
+    "mottle_size": 37.71389261187796,
+    "tree_lean": 0.15,
+    "dappled": 0.07122894426793225,
+    "variety": 0.8
+   },
+   "crown_lean": 0.5
+  },
+  "order": 0
+ },
+ "Longleaf Pine": {
+  "note": "Open longleaf pine woodland on pale sand, from Florida lidar and hyperspectral imagery",
+  "mix_amount": 0.1,
+  "species": [
+   {
+    "name": "Longleaf Pine",
+    "preset": "small_pine",
+    "height": 1.3,
+    "ramp": [
+     [
+      94,
+      108,
+      66
+     ],
+     [
+      113,
+      133,
+      80
+     ],
+     [
+      131,
+      147,
+      93
+     ],
+     [
+      157,
+      157,
+      111
+     ]
+    ],
+    "bark": [
+     96,
+     72,
+     52
+    ]
+   },
+   {
+    "name": "Turkey Oak",
+    "preset": "black_oak",
+    "height": 0.9,
+    "ramp": [
+     [
+      70,
+      70,
+      36
+     ],
+     [
+      104,
+      100,
+      48
+     ],
+     [
+      142,
+      134,
+      64
+     ],
+     [
+      180,
+      168,
+      92
+     ]
+    ],
+    "bark": [
+     70,
+     56,
+     44
+    ]
+   },
+   {
+    "name": "Palmetto",
+    "preset": "fan_palm",
+    "height": 0.4,
+    "ramp": [
+     [
+      79,
+      90,
+      55
+     ],
+     [
+      95,
+      112,
+      67
+     ],
+     [
+      110,
+      124,
+      78
+     ],
+     [
+      132,
+      132,
+      93
+     ]
+    ],
+    "bark": [
+     70,
+     56,
+     44
+    ]
+   }
+  ],
+  "grass": [
+   200,
+   186,
+   160
+  ],
+  "accent": [
+   214,
+   198,
+   166
+  ],
+  "haze": [
+   176,
+   160,
+   132
+  ],
+  "gen": {
+   "crown_max": 14.236419333462871,
+   "crown_min": 8.541851600077722,
+   "canopy_cover": 0.605615694151462,
+   "gaps": 0.9521722878111584,
+   "gap_size": 80.0,
+   "canopy_patch_size": 8.0,
+   "shrub_density": 0.5421148752074941,
+   "grass_density": 0.3142847436148985,
+   "haze_opacity": 0.17433843400140772,
+   "depth": {
+    "gain": 0.8297534995922248,
+    "gamma": 0.6905110834673472,
+    "crown_tone": 0.20032129858625852,
+    "crown_shade": 0.11675698399521885,
+    "height_var": 0.4,
+    "cluster_tone": 0.0,
+    "crown_var": 0.06964842075884924,
+    "depth_strength": 0.0,
+    "shade_radius": 16.159175082609895,
+    "crown_tone_size": 41.21066566024108,
+    "weave": 0.15290705174019525,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.13495376562727496,
+    "mottle_size": 36.08250571118259,
+    "tree_lean": 0.15,
+    "dappled": 0.0817946416223483,
+    "variety": 0.0
+   },
+   "crown_lean": 0.5
+  },
+  "order": 1
+ },
+ "Douglas-fir Forest": {
+  "note": "Dense Douglas-fir canopy over deep shadow, from Washington lidar and hyperspectral imagery",
+  "mix_amount": 0.08,
+  "species": [
+   {
+    "name": "Douglas Fir",
+    "preset": "douglas_fir",
+    "height": 1.5,
+    "ramp": [
+     [
+      42,
+      63,
+      57
+     ],
+     [
+      81,
+      111,
+      77
+     ],
+     [
+      110,
+      145,
+      95
+     ],
+     [
+      136,
+      174,
+      112
+     ]
+    ],
+    "bark": [
+     80,
+     60,
+     44
+    ]
+   },
+   {
+    "name": "Western Hemlock",
+    "preset": "balsam_fir",
+    "height": 1.4,
+    "ramp": [
+     [
+      22,
+      44,
+      40
+     ],
+     [
+      40,
+      70,
+      56
+     ],
+     [
+      62,
+      96,
+      72
+     ],
+     [
+      88,
+      124,
+      90
+     ]
+    ],
+    "bark": [
+     70,
+     56,
+     44
+    ]
+   },
+   {
+    "name": "Vine Maple",
+    "preset": "acer",
+    "height": 0.5,
+    "ramp": [
+     [
+      48,
+      70,
+      40
+     ],
+     [
+      80,
+      106,
+      52
+     ],
+     [
+      116,
+      142,
+      70
+     ],
+     [
+      152,
+      176,
+      96
+     ]
+    ],
+    "bark": [
+     70,
+     56,
+     44
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 12.067614585065975,
+   "crown_min": 7.240568751039585,
+   "canopy_cover": 0.861177301261174,
+   "gaps": 0.2751282918593233,
+   "gap_size": 57.14910148426412,
+   "canopy_patch_size": 13.25481549550473,
+   "shrub_density": 0.0,
+   "grass_density": 0.5,
+   "haze_opacity": 0.08995476976450656,
+   "depth": {
+    "gain": 1.0083222053044683,
+    "gamma": 0.727037698584529,
+    "crown_tone": 0.4993167171450436,
+    "crown_shade": 0.47458114322321,
+    "height_var": 0.6224696810217235,
+    "cluster_tone": 0.5032371375438006,
+    "crown_var": 0.10661235766895483,
+    "depth_strength": 1.2075220299075562,
+    "shade_radius": 6.985850763160647,
+    "crown_tone_size": 27.479334189610785,
+    "weave": 0.08642378340515648,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.05695701408121896,
+    "mottle_size": 15.331728593240687,
+    "tree_lean": 0.11043287478265743,
+    "dappled": 0.2365092498877612,
+    "variety": 0.6110176296260227
+   },
+   "crown_lean": 0.5
+  },
+  "order": 2
+ },
+ "Oak Savanna": {
+  "note": "Blue oak and gray pine over dry grass, measured from California aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.12,
+  "order": 6,
+  "species": [
+   {
+    "name": "Blue Oak",
+    "preset": "cambridge_oak",
+    "height": 1.0,
+    "ramp": [
+     [
+      87,
+      91,
+      73
+     ],
+     [
+      105,
+      109,
+      86
+     ],
+     [
+      121,
+      123,
+      98
+     ],
+     [
+      141,
+      141,
+      113
+     ]
+    ],
+    "bark": [
+     96,
+     84,
+     70
+    ]
+   },
+   {
+    "name": "Gray Pine",
+    "preset": "small_pine",
+    "height": 1.4,
+    "ramp": [
+     [
+      69,
+      81,
+      65
+     ],
+     [
+      84,
+      98,
+      77
+     ],
+     [
+      96,
+      110,
+      88
+     ],
+     [
+      112,
+      126,
+      101
+     ]
+    ],
+    "bark": [
+     92,
+     80,
+     66
+    ]
+   },
+   {
+    "name": "Manzanita",
+    "preset": "cambridge_oak",
+    "height": 0.5,
+    "ramp": [
+     [
+      82,
+      91,
+      65
+     ],
+     [
+      99,
+      109,
+      77
+     ],
+     [
+      114,
+      123,
+      88
+     ],
+     [
+      133,
+      141,
+      101
+     ]
+    ],
+    "bark": [
+     110,
+     70,
+     54
+    ]
+   }
+  ],
+  "grass": [
+   165,
+   140,
+   115
+  ],
+  "accent": [
+   178,
+   151,
+   124
+  ],
+  "haze": [
+   148,
+   126,
+   103
+  ],
+  "gen": {
+   "crown_max": 13.679868174588307,
+   "crown_min": 8.207920904752983,
+   "canopy_cover": 0.16123854662263656,
+   "gaps": 0.7678954342438173,
+   "gap_size": 16.409664265803684,
+   "canopy_patch_size": 535.0514325046336,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.0,
+    "gamma": 1.0,
+    "crown_tone": 0.12269632604017984,
+    "crown_shade": 0.5724542347926951,
+    "height_var": 0.7151554869867147,
+    "cluster_tone": 0.8,
+    "crown_var": 0.12,
+    "depth_strength": 0.2427406741898499,
+    "shade_radius": 33.19440158937007,
+    "crown_tone_size": 42.007584077787136,
+    "weave": 0.0,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.4,
+    "mottle_size": 4.0,
+    "tree_lean": 0.15,
+    "dappled": 0.24614830160445572,
+    "variety": 0.8
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Eastern Hardwood": {
+  "note": "Oak and maple woodland, measured from Massachusetts aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.15,
+  "order": 3,
+  "species": [
+   {
+    "name": "Red Oak",
+    "preset": "black_oak",
+    "height": 1.0,
+    "ramp": [
+     [
+      66,
+      89,
+      63
+     ],
+     [
+      86,
+      116,
+      75
+     ],
+     [
+      100,
+      135,
+      85
+     ],
+     [
+      117,
+      154,
+      95
+     ]
+    ],
+    "bark": [
+     92,
+     80,
+     66
+    ]
+   },
+   {
+    "name": "Eastern Hemlock",
+    "preset": "balsam_fir",
+    "height": 1.2,
+    "ramp": [
+     [
+      46,
+      75,
+      50
+     ],
+     [
+      60,
+      98,
+      60
+     ],
+     [
+      70,
+      114,
+      68
+     ],
+     [
+      81,
+      130,
+      76
+     ]
+    ],
+    "bark": [
+     84,
+     70,
+     58
+    ]
+   },
+   {
+    "name": "Witch Hazel",
+    "preset": "acer",
+    "height": 0.5,
+    "ramp": [
+     [
+      69,
+      89,
+      50
+     ],
+     [
+      90,
+      116,
+      60
+     ],
+     [
+      105,
+      135,
+      68
+     ],
+     [
+      122,
+      154,
+      76
+     ]
+    ],
+    "bark": [
+     110,
+     90,
+     66
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 17.2610470596485,
+   "crown_min": 10.3566282357891,
+   "canopy_cover": 1.0,
+   "gaps": 0.0,
+   "gap_size": 37.59024315776102,
+   "canopy_patch_size": 146.4409258125962,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.248157334801676,
+    "gamma": 1.0,
+    "crown_tone": 0.02497738685559474,
+    "crown_shade": 0.2670656675761221,
+    "height_var": 0.4,
+    "cluster_tone": 0.7447680277367814,
+    "crown_var": 0.12,
+    "depth_strength": 0.7829985507942138,
+    "shade_radius": 10.123989594994871,
+    "crown_tone_size": 108.7979135334749,
+    "weave": 0.22382308890597918,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.4,
+    "mottle_size": 73.55592798613976,
+    "tree_lean": 0.14475099232891322,
+    "dappled": 0.26906129075082474,
+    "variety": 0.704840752089217
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Spruce-Fir Forest": {
+  "note": "Red spruce and balsam fir, measured from New Hampshire aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.1,
+  "order": 4,
+  "species": [
+   {
+    "name": "Red Spruce",
+    "preset": "balsam_fir",
+    "height": 1.3,
+    "ramp": [
+     [
+      59,
+      76,
+      59
+     ],
+     [
+      79,
+      102,
+      70
+     ],
+     [
+      97,
+      122,
+      80
+     ],
+     [
+      118,
+      142,
+      94
+     ]
+    ],
+    "bark": [
+     80,
+     66,
+     56
+    ]
+   },
+   {
+    "name": "Paper Birch",
+    "preset": "silver_birch",
+    "height": 1.0,
+    "ramp": [
+     [
+      64,
+      83,
+      53
+     ],
+     [
+      86,
+      112,
+      63
+     ],
+     [
+      106,
+      134,
+      72
+     ],
+     [
+      129,
+      156,
+      84
+     ]
+    ],
+    "bark": [
+     214,
+     208,
+     196
+    ]
+   },
+   {
+    "name": "Mountain Ash",
+    "preset": "sphere_tree",
+    "height": 0.5,
+    "ramp": [
+     [
+      59,
+      76,
+      50
+     ],
+     [
+      79,
+      102,
+      59
+     ],
+     [
+      97,
+      122,
+      68
+     ],
+     [
+      118,
+      142,
+      79
+     ]
+    ],
+    "bark": [
+     96,
+     74,
+     60
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 7.777777777777778,
+   "crown_min": 4.666666666666666,
+   "canopy_cover": 0.9810851690771499,
+   "gaps": 0.1839618836942985,
+   "gap_size": 9.563361375175049,
+   "canopy_patch_size": 8.0,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.1028332589141017,
+    "gamma": 0.9106552174457868,
+    "crown_tone": 0.18988981616174366,
+    "crown_shade": 0.020261664506824734,
+    "height_var": 0.7949801988644503,
+    "cluster_tone": 0.8,
+    "crown_var": 0.11706434103963533,
+    "depth_strength": 0.12682178406697844,
+    "shade_radius": 23.41527017679549,
+    "crown_tone_size": 53.80409524576096,
+    "weave": 0.45,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.23374036059048295,
+    "mottle_size": 65.33603072504518,
+    "tree_lean": 0.13061193661729736,
+    "dappled": 0.3,
+    "variety": 0.6552590487347503
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Subalpine Forest": {
+  "note": "Engelmann spruce and subalpine fir with open patches, measured from Colorado aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.12,
+  "order": 5,
+  "species": [
+   {
+    "name": "Engelmann Spruce",
+    "preset": "balsam_fir",
+    "height": 1.3,
+    "ramp": [
+     [
+      52,
+      64,
+      46
+     ],
+     [
+      84,
+      98,
+      68
+     ],
+     [
+      110,
+      125,
+      85
+     ],
+     [
+      136,
+      150,
+      103
+     ]
+    ],
+    "bark": [
+     76,
+     64,
+     54
+    ]
+   },
+   {
+    "name": "Lodgepole Pine",
+    "preset": "small_pine",
+    "height": 1.2,
+    "ramp": [
+     [
+      57,
+      70,
+      41
+     ],
+     [
+      92,
+      107,
+      61
+     ],
+     [
+      121,
+      137,
+      76
+     ],
+     [
+      149,
+      165,
+      92
+     ]
+    ],
+    "bark": [
+     96,
+     78,
+     62
+    ]
+   },
+   {
+    "name": "Willow Shrub",
+    "preset": "black_oak",
+    "height": 0.4,
+    "ramp": [
+     [
+      57,
+      70,
+      41
+     ],
+     [
+      92,
+      107,
+      61
+     ],
+     [
+      121,
+      137,
+      76
+     ],
+     [
+      149,
+      165,
+      92
+     ]
+    ],
+    "bark": [
+     110,
+     90,
+     70
+    ]
+   }
+  ],
+  "grass": [
+   240,
+   238,
+   198
+  ],
+  "accent": [
+   255,
+   255,
+   213
+  ],
+  "haze": [
+   216,
+   214,
+   178
+  ],
+  "gen": {
+   "crown_max": 5.0533132264870595,
+   "crown_min": 3.0319879358922357,
+   "canopy_cover": 0.7,
+   "gaps": 0.09152163751098405,
+   "gap_size": 4.0,
+   "canopy_patch_size": 8.0,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.1020973338741629,
+    "gamma": 1.0,
+    "crown_tone": 0.16590509190802344,
+    "crown_shade": 0.2506381253484752,
+    "height_var": 0.4,
+    "cluster_tone": 0.8,
+    "crown_var": 0.12,
+    "depth_strength": 0.8048529148790227,
+    "shade_radius": 4.749172354540684,
+    "crown_tone_size": 28,
+    "weave": 0.1497244614743371,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.25886707953144017,
+    "mottle_size": 49.3576134169902,
+    "tree_lean": 0.10800519551821407,
+    "dappled": 0.3,
+    "variety": 0.8
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Bottomland Swamp": {
+  "note": "Water tupelo and cypress swamp forest, measured from Alabama aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.2,
+  "order": 7,
+  "species": [
+   {
+    "name": "Water Tupelo",
+    "preset": "black_tupelo",
+    "height": 1.0,
+    "ramp": [
+     [
+      63,
+      86,
+      57
+     ],
+     [
+      82,
+      110,
+      67
+     ],
+     [
+      95,
+      125,
+      74
+     ],
+     [
+      111,
+      141,
+      85
+     ]
+    ],
+    "bark": [
+     78,
+     70,
+     60
+    ]
+   },
+   {
+    "name": "Bald Cypress",
+    "preset": "weeping_willow",
+    "height": 1.1,
+    "ramp": [
+     [
+      59,
+      86,
+      51
+     ],
+     [
+      77,
+      110,
+      60
+     ],
+     [
+      90,
+      125,
+      66
+     ],
+     [
+      105,
+      141,
+      76
+     ]
+    ],
+    "bark": [
+     100,
+     80,
+     64
+    ]
+   },
+   {
+    "name": "Swamp Privet",
+    "preset": "black_oak",
+    "height": 0.5,
+    "ramp": [
+     [
+      66,
+      90,
+      51
+     ],
+     [
+      86,
+      115,
+      60
+     ],
+     [
+      99,
+      131,
+      66
+     ],
+     [
+      116,
+      148,
+      76
+     ]
+    ],
+    "bark": [
+     90,
+     76,
+     60
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 17.433322263458457,
+   "crown_min": 10.459993358075074,
+   "canopy_cover": 0.7,
+   "gaps": 0.2,
+   "gap_size": 75.7470758907778,
+   "canopy_patch_size": 14.159283821191437,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.1925273953047633,
+    "gamma": 0.7281186569726414,
+    "crown_tone": 0.33780919612256327,
+    "crown_shade": 0.0,
+    "height_var": 0.5828536250507164,
+    "cluster_tone": 0.6543638733114671,
+    "crown_var": 0.102357814328405,
+    "depth_strength": 0.605379381025706,
+    "shade_radius": 23.785031772481577,
+    "crown_tone_size": 40.711591921312575,
+    "weave": 0.30503347654429247,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.36264878829573294,
+    "mottle_size": 78.64273389172135,
+    "tree_lean": 0.15,
+    "dappled": 0.24750863529319742,
+    "variety": 0.6742366561257526
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Hawaiian Rainforest": {
+  "note": "Wet ohia forest, measured from Hawaii aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.15,
+  "order": 8,
+  "species": [
+   {
+    "name": "Ohia",
+    "preset": "black_tupelo",
+    "height": 1.0,
+    "ramp": [
+     [
+      62,
+      70,
+      60
+     ],
+     [
+      87,
+      96,
+      76
+     ],
+     [
+      106,
+      116,
+      88
+     ],
+     [
+      123,
+      133,
+      100
+     ]
+    ],
+    "bark": [
+     92,
+     78,
+     64
+    ]
+   },
+   {
+    "name": "Koa",
+    "preset": "acer",
+    "height": 1.1,
+    "ramp": [
+     [
+      62,
+      73,
+      54
+     ],
+     [
+      87,
+      100,
+      68
+     ],
+     [
+      106,
+      121,
+      79
+     ],
+     [
+      123,
+      139,
+      90
+     ]
+    ],
+    "bark": [
+     100,
+     80,
+     64
+    ]
+   },
+   {
+    "name": "Tree Fern",
+    "preset": "fan_palm",
+    "height": 0.5,
+    "ramp": [
+     [
+      55,
+      77,
+      51
+     ],
+     [
+      78,
+      105,
+      64
+     ],
+     [
+      95,
+      127,
+      74
+     ],
+     [
+      110,
+      146,
+      85
+     ]
+    ],
+    "bark": [
+     90,
+     76,
+     60
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 13.105592471085679,
+   "crown_min": 7.863355482651407,
+   "canopy_cover": 0.9787056393826495,
+   "gaps": 0.0,
+   "gap_size": 56.82802468885945,
+   "canopy_patch_size": 8.0,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.1020973338741629,
+    "gamma": 0.7871615358411027,
+    "crown_tone": 0.2649076141065134,
+    "crown_shade": 0.2721516788262946,
+    "height_var": 1.0,
+    "cluster_tone": 0.7030325079372356,
+    "crown_var": 0.11706434103963533,
+    "depth_strength": 0.4884576352445641,
+    "shade_radius": 19.3271037199002,
+    "crown_tone_size": 161.99504339624116,
+    "weave": 0.3605864848259692,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.33375808984224836,
+    "mottle_size": 5.938249116770625,
+    "tree_lean": 0.15,
+    "dappled": 0.29873715048211585,
+    "variety": 0.680724903351186
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Autumn Hardwood": {
+  "note": "Hardwood forest in October, measured from Great Smoky Mountains aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.45,
+  "order": 9,
+  "species": [
+   {
+    "name": "Hickory",
+    "preset": "black_oak",
+    "height": 1.0,
+    "ramp": [
+     [
+      102,
+      95,
+      67
+     ],
+     [
+      127,
+      118,
+      82
+     ],
+     [
+      147,
+      136,
+      92
+     ],
+     [
+      168,
+      155,
+      102
+     ]
+    ],
+    "bark": [
+     92,
+     80,
+     66
+    ]
+   },
+   {
+    "name": "Red Oak",
+    "preset": "cambridge_oak",
+    "height": 1.0,
+    "ramp": [
+     [
+      50,
+      59,
+      55
+     ],
+     [
+      79,
+      88,
+      67
+     ],
+     [
+      101,
+      111,
+      79
+     ],
+     [
+      126,
+      128,
+      92
+     ]
+    ],
+    "bark": [
+     84,
+     70,
+     58
+    ]
+   },
+   {
+    "name": "Sumac",
+    "preset": "acer",
+    "height": 0.5,
+    "ramp": [
+     [
+      102,
+      95,
+      67
+     ],
+     [
+      127,
+      118,
+      82
+     ],
+     [
+      147,
+      136,
+      92
+     ],
+     [
+      168,
+      155,
+      102
+     ]
+    ],
+    "bark": [
+     110,
+     90,
+     66
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 14.666666666666664,
+   "crown_min": 8.799999999999999,
+   "canopy_cover": 0.8489980951458589,
+   "gaps": 1.0,
+   "gap_size": 7.669014458385877,
+   "canopy_patch_size": 8.005393296698683,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.1028332589141017,
+    "gamma": 0.975630184487165,
+    "crown_tone": 0.26463572515985634,
+    "crown_shade": 0.5505516910557842,
+    "height_var": 0.4207974488361114,
+    "cluster_tone": 0.3953510658159402,
+    "crown_var": 0.11706434103963533,
+    "depth_strength": 0.0,
+    "shade_radius": 8.17673736563729,
+    "crown_tone_size": 38.352561664572164,
+    "weave": 0.0,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.22817724742768705,
+    "mottle_size": 63.71231481208101,
+    "tree_lean": 0.15,
+    "dappled": 0.2971410981264863,
+    "variety": 0.7473013795552735
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Boreal Forest": {
+  "note": "Spruce forest of interior Alaska, measured from aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.1,
+  "order": 10,
+  "species": [
+   {
+    "name": "Black Spruce",
+    "preset": "balsam_fir",
+    "height": 1.2,
+    "ramp": [
+     [
+      73,
+      88,
+      83
+     ],
+     [
+      88,
+      103,
+      90
+     ],
+     [
+      98,
+      114,
+      96
+     ],
+     [
+      108,
+      124,
+      102
+     ]
+    ],
+    "bark": [
+     70,
+     60,
+     50
+    ]
+   },
+   {
+    "name": "Paper Birch",
+    "preset": "silver_birch",
+    "height": 1.0,
+    "ramp": [
+     [
+      83,
+      101,
+      78
+     ],
+     [
+      101,
+      118,
+      85
+     ],
+     [
+      112,
+      131,
+      91
+     ],
+     [
+      124,
+      142,
+      96
+     ]
+    ],
+    "bark": [
+     214,
+     208,
+     196
+    ]
+   },
+   {
+    "name": "Dwarf Birch",
+    "preset": "sphere_tree",
+    "height": 0.4,
+    "ramp": [
+     [
+      76,
+      92,
+      74
+     ],
+     [
+      92,
+      108,
+      81
+     ],
+     [
+      102,
+      119,
+      86
+     ],
+     [
+      113,
+      130,
+      91
+     ]
+    ],
+    "bark": [
+     96,
+     74,
+     60
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 4.4,
+   "crown_min": 2.64,
+   "canopy_cover": 0.7978203315304736,
+   "gaps": 1.0,
+   "gap_size": 4.0,
+   "canopy_patch_size": 205.35988451504107,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.3194476359828864,
+    "gamma": 0.9059015761777063,
+    "crown_tone": 0.012270363705166015,
+    "crown_shade": 0.2660755647644121,
+    "height_var": 0.90014412878049,
+    "cluster_tone": 0.6612343427246818,
+    "crown_var": 0.12,
+    "depth_strength": 0.2126609221848314,
+    "shade_radius": 33.990759374082614,
+    "crown_tone_size": 150.98680800438873,
+    "weave": 0.4488897353685579,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.36295784583561264,
+    "mottle_size": 34.368225786413326,
+    "tree_lean": 0.1487028075010347,
+    "dappled": 0.3,
+    "variety": 0.8
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Pinyon-Juniper": {
+  "note": "Pinyon pine and juniper over desert soil, measured from Utah aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.2,
+  "order": 11,
+  "species": [
+   {
+    "name": "Pinyon Pine",
+    "preset": "small_pine",
+    "height": 1.0,
+    "ramp": [
+     [
+      93,
+      99,
+      76
+     ],
+     [
+      109,
+      115,
+      86
+     ],
+     [
+      120,
+      126,
+      92
+     ],
+     [
+      130,
+      136,
+      97
+     ]
+    ],
+    "bark": [
+     96,
+     78,
+     62
+    ]
+   },
+   {
+    "name": "Utah Juniper",
+    "preset": "sphere_tree",
+    "height": 0.9,
+    "ramp": [
+     [
+      83,
+      99,
+      72
+     ],
+     [
+      98,
+      115,
+      81
+     ],
+     [
+      108,
+      126,
+      87
+     ],
+     [
+      117,
+      136,
+      92
+     ]
+    ],
+    "bark": [
+     110,
+     82,
+     62
+    ]
+   },
+   {
+    "name": "Sagebrush",
+    "preset": "black_oak",
+    "height": 0.4,
+    "ramp": [
+     [
+      106,
+      113,
+      76
+     ],
+     [
+      125,
+      132,
+      86
+     ],
+     [
+      138,
+      144,
+      92
+     ],
+     [
+      149,
+      156,
+      97
+     ]
+    ],
+    "bark": [
+     120,
+     100,
+     80
+    ]
+   }
+  ],
+  "grass": [
+   219,
+   196,
+   161
+  ],
+  "accent": [
+   236,
+   211,
+   173
+  ],
+  "haze": [
+   197,
+   176,
+   144
+  ],
+  "gen": {
+   "crown_max": 6.23427754984463,
+   "crown_min": 3.740566529906778,
+   "canopy_cover": 0.15,
+   "gaps": 1.0,
+   "gap_size": 75.48787196650507,
+   "canopy_patch_size": 8.0,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.0,
+    "gamma": 1.0,
+    "crown_tone": 0.0,
+    "crown_shade": 0.2865424726205222,
+    "height_var": 0.4,
+    "cluster_tone": 0.7523457698410366,
+    "crown_var": 0.12,
+    "depth_strength": 0.3155435455987259,
+    "shade_radius": 22.628081915653862,
+    "crown_tone_size": 87.74359997703752,
+    "weave": 0.45,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.4,
+    "mottle_size": 51.70104722722707,
+    "tree_lean": 0.14996059645648055,
+    "dappled": 0.282356417362221,
+    "variety": 0.8
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Sierra Conifer": {
+  "note": "Mixed conifer forest with open ground, measured from California aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.2,
+  "order": 12,
+  "species": [
+   {
+    "name": "White Fir",
+    "preset": "douglas_fir",
+    "height": 1.5,
+    "ramp": [
+     [
+      25,
+      44,
+      33
+     ],
+     [
+      75,
+      90,
+      68
+     ],
+     [
+      107,
+      124,
+      87
+     ],
+     [
+      130,
+      148,
+      103
+     ]
+    ],
+    "bark": [
+     80,
+     66,
+     56
+    ]
+   },
+   {
+    "name": "Jeffrey Pine",
+    "preset": "small_pine",
+    "height": 1.4,
+    "ramp": [
+     [
+      27,
+      46,
+      29
+     ],
+     [
+      82,
+      94,
+      61
+     ],
+     [
+      117,
+      130,
+      78
+     ],
+     [
+      143,
+      155,
+      92
+     ]
+    ],
+    "bark": [
+     96,
+     78,
+     62
+    ]
+   },
+   {
+    "name": "Manzanita",
+    "preset": "black_oak",
+    "height": 0.5,
+    "ramp": [
+     [
+      23,
+      44,
+      28
+     ],
+     [
+      71,
+      90,
+      57
+     ],
+     [
+      101,
+      124,
+      73
+     ],
+     [
+      123,
+      148,
+      87
+     ]
+    ],
+    "bark": [
+     110,
+     70,
+     54
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 11.08953796060991,
+   "crown_min": 6.653722776365946,
+   "canopy_cover": 0.4292149021213971,
+   "gaps": 0.18987084516251376,
+   "gap_size": 49.292916161746405,
+   "canopy_patch_size": 594.6079778055617,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.1028332589141017,
+    "gamma": 1.6,
+    "crown_tone": 0.19060687412555216,
+    "crown_shade": 0.2009073279800784,
+    "height_var": 1.2236651730597177,
+    "cluster_tone": 0.3138497100328432,
+    "crown_var": 0.10013302013671042,
+    "depth_strength": 0.8706536433542489,
+    "shade_radius": 6.985850763160647,
+    "crown_tone_size": 56.850374760512835,
+    "weave": 0.0031609068850519135,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.36295784583561264,
+    "mottle_size": 38.35716419682994,
+    "tree_lean": 0.15,
+    "dappled": 0.23301169721686943,
+    "variety": 0.7966933647183702
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Tropical Dry Forest": {
+  "note": "Dry tropical forest, measured from Puerto Rico aerial lidar and hyperspectral imagery",
+  "mix_amount": 0.15,
+  "order": 13,
+  "species": [
+   {
+    "name": "Gumbo Limbo",
+    "preset": "black_tupelo",
+    "height": 1.0,
+    "ramp": [
+     [
+      62,
+      82,
+      54
+     ],
+     [
+      86,
+      110,
+      69
+     ],
+     [
+      101,
+      127,
+      79
+     ],
+     [
+      115,
+      143,
+      89
+     ]
+    ],
+    "bark": [
+     110,
+     90,
+     70
+    ]
+   },
+   {
+    "name": "Ceiba",
+    "preset": "cambridge_oak",
+    "height": 1.3,
+    "ramp": [
+     [
+      62,
+      86,
+      48
+     ],
+     [
+      86,
+      115,
+      62
+     ],
+     [
+      101,
+      133,
+      71
+     ],
+     [
+      115,
+      150,
+      80
+     ]
+    ],
+    "bark": [
+     150,
+     140,
+     126
+    ]
+   },
+   {
+    "name": "Acacia Scrub",
+    "preset": "acer",
+    "height": 0.5,
+    "ramp": [
+     [
+      65,
+      82,
+      43
+     ],
+     [
+      90,
+      110,
+      55
+     ],
+     [
+      106,
+      127,
+      63
+     ],
+     [
+      120,
+      143,
+      71
+     ]
+    ],
+    "bark": [
+     90,
+     76,
+     60
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 9.387173526477632,
+   "crown_min": 5.632304115886579,
+   "canopy_cover": 1.0,
+   "gaps": 0.2,
+   "gap_size": 4.0,
+   "canopy_patch_size": 53.74529406776745,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.1925273953047633,
+    "gamma": 1.0,
+    "crown_tone": 0.3302128543700312,
+    "crown_shade": 0.0,
+    "height_var": 1.2181829389643204,
+    "cluster_tone": 0.4525692021820438,
+    "crown_var": 0.12,
+    "depth_strength": 0.0,
+    "shade_radius": 10.763790452786292,
+    "crown_tone_size": 31.146153848906167,
+    "weave": 0.45,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.4,
+    "mottle_size": 60.01898118937036,
+    "tree_lean": 0.15,
+    "dappled": 0.20342160901491887,
+    "variety": 0.4991833041647202
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Caribbean Rainforest": {
+  "note": "Montane rainforest, measured from NASA G-LiHT aerial lidar and photos of El Yunque, Puerto Rico",
+  "mix_amount": 0.15,
+  "order": 14,
+  "species": [
+   {
+    "name": "Tabonuco",
+    "preset": "black_tupelo",
+    "height": 1.0,
+    "ramp": [
+     [
+      39,
+      50,
+      23
+     ],
+     [
+      68,
+      82,
+      36
+     ],
+     [
+      95,
+      110,
+      48
+     ],
+     [
+      123,
+      138,
+      62
+     ]
+    ],
+    "bark": [
+     92,
+     78,
+     64
+    ]
+   },
+   {
+    "name": "Sierra Palm",
+    "preset": "palm",
+    "height": 1.1,
+    "ramp": [
+     [
+      35,
+      52,
+      20
+     ],
+     [
+      61,
+      86,
+      32
+     ],
+     [
+      85,
+      115,
+      43
+     ],
+     [
+      110,
+      144,
+      55
+     ]
+    ],
+    "bark": [
+     120,
+     104,
+     80
+    ]
+   },
+   {
+    "name": "Tree Fern",
+    "preset": "fan_palm",
+    "height": 0.5,
+    "ramp": [
+     [
+      37,
+      55,
+      20
+     ],
+     [
+      64,
+      90,
+      32
+     ],
+     [
+      90,
+      121,
+      43
+     ],
+     [
+      116,
+      151,
+      55
+     ]
+    ],
+    "bark": [
+     90,
+     76,
+     60
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 14.295287750409711,
+   "crown_min": 8.577172650245826,
+   "canopy_cover": 0.706045953260984,
+   "gaps": 0.04208592850254303,
+   "gap_size": 18.513071613764318,
+   "canopy_patch_size": 298.11956693481534,
+   "shrub_density": 0.5,
+   "grass_density": 0.5,
+   "haze_opacity": 0.1,
+   "depth": {
+    "gain": 1.636992973995918,
+    "gamma": 0.9038213207967343,
+    "crown_tone": 0.44531550684662685,
+    "crown_shade": 0.3761149777210594,
+    "height_var": 0.4207974488361114,
+    "cluster_tone": 0.8,
+    "crown_var": 0.12,
+    "depth_strength": 1.6507787017289102,
+    "shade_radius": 7.488272781388517,
+    "crown_tone_size": 166.79191695152838,
+    "weave": 0.06907720214171957,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 0.21984662248728848,
+    "mottle_size": 4.0,
+    "tree_lean": 0.11579028140267603,
+    "dappled": 0.24735350278218124,
+    "variety": 0.8
+   },
+   "crown_lean": 0.5
+  }
+ },
+ "Bamboo Grove": {
+  "note": "Moso bamboo groves, measured from Japanese aerial photos of the Kyoto hills",
+  "mix_amount": 0.1,
+  "order": 15,
+  "species": [
+   {
+    "name": "Moso Bamboo",
+    "preset": "bamboo",
+    "height": 1.0,
+    "ramp": [
+     [
+      70,
+      82,
+      49
+     ],
+     [
+      91,
+      103,
+      64
+     ],
+     [
+      110,
+      124,
+      78
+     ],
+     [
+      133,
+      148,
+      94
+     ]
+    ],
+    "bark": [
+     150,
+     140,
+     90
+    ]
+   },
+   {
+    "name": "Hinoki Cypress",
+    "preset": "balsam_fir",
+    "height": 1.2,
+    "ramp": [
+     [
+      53,
+      69,
+      46
+     ],
+     [
+      69,
+      87,
+      60
+     ],
+     [
+      84,
+      105,
+      73
+     ],
+     [
+      101,
+      125,
+      88
+     ]
+    ],
+    "bark": [
+     90,
+     70,
+     56
+    ]
+   },
+   {
+    "name": "Bamboo Grass",
+    "preset": "fan_palm",
+    "height": 0.4,
+    "ramp": [
+     [
+      80,
+      90,
+      52
+     ],
+     [
+      103,
+      113,
+      68
+     ],
+     [
+      126,
+      136,
+      83
+     ],
+     [
+      152,
+      162,
+      100
+     ]
+    ],
+    "bark": [
+     140,
+     130,
+     90
+    ]
+   }
+  ],
+  "grass": [
+   70,
+   86,
+   40
+  ],
+  "accent": [
+   96,
+   110,
+   50
+  ],
+  "haze": [
+   55,
+   61,
+   34
+  ],
+  "gen": {
+   "crown_max": 5.0,
+   "crown_min": 3.0,
+   "canopy_cover": 0.9812439952836433,
+   "gaps": 0.0,
+   "gap_size": 7.477522152297672,
+   "canopy_patch_size": 462.8176386045546,
+   "shrub_density": 0.4346043827938808,
+   "grass_density": 0.6447407671559969,
+   "haze_opacity": 0.03248110239706993,
+   "depth": {
+    "gain": 1.4643563315649089,
+    "gamma": 1.5926649090348957,
+    "crown_tone": 0.15136518002534677,
+    "crown_shade": 0.33337131768037415,
+    "height_var": 0.19143990505733138,
+    "cluster_tone": 2.0768766229585305,
+    "crown_var": 0.0,
+    "depth_strength": 1.1398655715287644,
+    "shade_radius": 11.418337595540107,
+    "crown_tone_size": 14.600905748662738,
+    "weave": 0.771234547549131,
+    "smooth": 0.0,
+    "canopy_ao": 0.6,
+    "translucency": 0.5,
+    "lumps": 0.35
+   },
+   "leaf": {
+    "mottling": 3.0,
+    "mottle_size": 4.0,
+    "tree_lean": 0.5036414536484866,
+    "dappled": 0.20550431465646177,
+    "variety": 3.1370060765837775
+   },
+   "crown_lean": 0.5
+  }
+ }
+}

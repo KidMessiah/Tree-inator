@@ -1,0 +1,391 @@
+{
+ "default": {
+  "from": "Eastern Hardwood",
+  "strength": 0.5,
+  "layout": 0.5,
+  "tone": 0.4,
+  "sat": 0.9,
+  "val": 1.0,
+  "crown": 1.0
+ },
+ "themes": {
+  "Temperate": {
+   "from": "Eastern Hardwood",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.85,
+   "val": 0.97,
+   "crown": 1.0
+  },
+  "Autumn": {
+   "from": "Autumn Hardwood",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.6,
+   "sat": 0.9,
+   "val": 0.97,
+   "crown": 1.0
+  },
+  "Golden Ginkgo": {
+   "from": "Autumn Hardwood",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.5,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Cherry Blossom": {
+   "from": "Eastern Hardwood",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.5,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 0.8
+  },
+  "Frozen": {
+   "from": "Boreal Forest",
+   "strength": 0.6,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Taiga": {
+   "from": "Boreal Forest",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.85,
+   "val": 0.97,
+   "crown": 1.0
+  },
+  "Alpine": {
+   "from": "Subalpine Forest",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.85,
+   "val": 0.97,
+   "crown": 1.0
+  },
+  "Windswept Heath": {
+   "from": "Subalpine Forest",
+   "strength": 0.5,
+   "layout": 0.7,
+   "tone": 0.5,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 0.8
+  },
+  "Swamp": {
+   "from": "Bottomland Swamp",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.85,
+   "val": 0.97,
+   "crown": 1.0
+  },
+  "Mangrove": {
+   "from": "Bottomland Swamp",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.4,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Stilt Mangrove": {
+   "from": "Bottomland Swamp",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.4,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Savanna": {
+   "from": "Oak Savanna",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.85,
+   "val": 0.97,
+   "crown": 1.0
+  },
+  "Mediterranean": {
+   "from": "Oak Savanna",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.85,
+   "val": 0.97,
+   "crown": 0.9
+  },
+  "Eucalyptus Woodland": {
+   "from": "Oak Savanna",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.4,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.2
+  },
+  "Baobab Plains": {
+   "from": "Oak Savanna",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.4,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.5
+  },
+  "Badlands": {
+   "from": "Pinyon-Juniper",
+   "strength": 0.6,
+   "layout": 0.7,
+   "tone": 0.4,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Mojave": {
+   "from": "Pinyon-Juniper",
+   "strength": 0.6,
+   "layout": 0.7,
+   "tone": 0.4,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 0.8
+  },
+  "Dragon Blood Isle": {
+   "from": "Pinyon-Juniper",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.4,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.3
+  },
+  "Volcanic": {
+   "from": "Pinyon-Juniper",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.4,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Jungle": {
+   "from": "Caribbean Rainforest",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.85,
+   "val": 0.97,
+   "crown": 1.0
+  },
+  "Banyan Grove": {
+   "from": "Caribbean Rainforest",
+   "strength": 0.6,
+   "layout": 0.6,
+   "tone": 0.4,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.6
+  },
+  "Bamboo": {
+   "from": "Bamboo Grove",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Redwood": {
+   "from": "Douglas-fir Forest",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.85,
+   "val": 0.97,
+   "crown": 1.5
+  },
+  "Dead Forest": {
+   "from": "Aspen Stand",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.3,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Bare Winter": {
+   "from": "Aspen Stand",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.3,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Burnt Forest": {
+   "from": "Aspen Stand",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.3,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Feywild": {
+   "from": "Eastern Hardwood",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 1.1
+  },
+  "Shadowfell": {
+   "from": "Boreal Forest",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 0.9
+  },
+  "Hellscape": {
+   "from": "Pinyon-Juniper",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Ember Waste": {
+   "from": "Oak Savanna",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Crystal Grove": {
+   "from": "Aspen Stand",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Fungal": {
+   "from": "Hawaiian Rainforest",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Celestial": {
+   "from": "Aspen Stand",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Astral": {
+   "from": "Subalpine Forest",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Blighted": {
+   "from": "Bottomland Swamp",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Bloodwood": {
+   "from": "Bottomland Swamp",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Silverwood": {
+   "from": "Boreal Forest",
+   "strength": 0.5,
+   "layout": 0.6,
+   "tone": 0.6,
+   "sat": 0.95,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Juniper Highlands": {
+   "from": "Pinyon-Juniper",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Spruce Spires": {
+   "from": "Spruce-Fir Forest",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Cypress Bayou": {
+   "from": "Bottomland Swamp",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.0
+  },
+  "Live Oak Hammock": {
+   "from": "Oak Savanna",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.2
+  },
+  "Acacia Plains": {
+   "from": "Oak Savanna",
+   "strength": 0.7,
+   "layout": 0.8,
+   "tone": 0.5,
+   "sat": 0.9,
+   "val": 1.0,
+   "crown": 1.2
+  }
+ }
+}

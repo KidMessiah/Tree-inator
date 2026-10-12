@@ -41,8 +41,8 @@ fn structure_key(p: &Project, scale: f32) -> String {
     q.erased.clear();
     // the picture under the forest is only for the editor
     q.background_image = None;
-    // only the crown height spread changes how trees are drawn
-    gq.depth = DepthStyle { height_var: p.gen.depth.height_var, ..d.depth.clone() };
+    // only the crown height spread and the weave change how trees are drawn
+    gq.depth = DepthStyle { height_var: p.gen.depth.height_var, weave: p.gen.depth.weave, ..d.depth.clone() };
     for sp in q.species.iter_mut() {
         sp.ramp = [[0.0; 3]; 4];
         sp.bark = [0.0; 3];
@@ -206,7 +206,9 @@ pub(crate) fn strip_halo(project: &Project, plan: &Plan, scale: f32) -> (usize, 
     ]
     .into_iter()
     .fold(0.0f32, f32::max);
-    let reach = (3.0 * blur + 12.0).ceil() as usize;
+    // smoothing reads pixels around each one, which must be shaded exactly too
+    let smooth = crate::smooth::radius(g.depth.smooth, 0.5 * (g.crown_min + g.crown_max) * s);
+    let reach = (3.0 * blur + 12.0).ceil() as usize + smooth;
     if !light.shadows {
         return (reach, reach);
     }
@@ -222,6 +224,204 @@ pub(crate) fn strip_halo(project: &Project, plan: &Plan, scale: f32) -> (usize, 
     }
 }
 
+/// How an export is written.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ExportFormat {
+    /// PNG, quick to write.
+    #[default]
+    Png,
+    /// PNG with the best compression: a smaller file, slower to write.
+    PngSmall,
+    /// A folder of PNG tiles, 1024 px square, with a small index file, for very large maps and for web or table
+    /// top programs that load maps in tiles. Written strip by strip, so any size fits in memory.
+    Tiles,
+    /// Lossless WebP: usually well under half the size of the PNG. The whole picture is held in memory.
+    Webp,
+    /// JPEG at high quality, without transparency. The whole picture is held in memory.
+    Jpeg,
+}
+
+impl ExportFormat {
+    pub const ALL: [ExportFormat; 5] = [ExportFormat::Png, ExportFormat::PngSmall, ExportFormat::Tiles, ExportFormat::Webp, ExportFormat::Jpeg];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ExportFormat::Png => "PNG",
+            ExportFormat::PngSmall => "PNG, smallest file",
+            ExportFormat::Tiles => "PNG tiles (folder)",
+            ExportFormat::Webp => "WebP, lossless",
+            ExportFormat::Jpeg => "JPEG",
+        }
+    }
+
+    /// File extension, or None for the tile folder.
+    pub fn extension(&self) -> Option<&'static str> {
+        match self {
+            ExportFormat::Png | ExportFormat::PngSmall => Some("png"),
+            ExportFormat::Tiles => None,
+            ExportFormat::Webp => Some("webp"),
+            ExportFormat::Jpeg => Some("jpg"),
+        }
+    }
+}
+
+/// Where the rows of an export go.
+trait Sink {
+    fn rows(&mut self, rgba: &[u8], n: usize) -> Result<(), String>;
+    fn finish(self: Box<Self>) -> Result<(), String>;
+}
+
+struct PngSink(png::StreamWriter<'static, std::io::BufWriter<std::fs::File>>);
+
+impl Sink for PngSink {
+    fn rows(&mut self, rgba: &[u8], _n: usize) -> Result<(), String> {
+        self.0.write_all(rgba).map_err(|e| e.to_string())
+    }
+    fn finish(self: Box<Self>) -> Result<(), String> {
+        self.0.finish().map_err(|e| e.to_string())
+    }
+}
+
+/// The picture is gathered whole, then encoded in one go.
+struct WholeSink {
+    path: PathBuf,
+    w: usize,
+    h: usize,
+    format: ExportFormat,
+    data: Vec<u8>,
+}
+
+/// More than this many pixels will not be gathered whole.
+const WHOLE_MAX_PX: usize = 120_000_000;
+
+impl Sink for WholeSink {
+    fn rows(&mut self, rgba: &[u8], _n: usize) -> Result<(), String> {
+        self.data.extend_from_slice(rgba);
+        Ok(())
+    }
+    fn finish(self: Box<Self>) -> Result<(), String> {
+        let file = std::io::BufWriter::new(std::fs::File::create(&self.path).map_err(|e| format!("{}: {e}", self.path.display()))?);
+        match self.format {
+            ExportFormat::Webp => image::codecs::webp::WebPEncoder::new_lossless(file)
+                .encode(&self.data, self.w as u32, self.h as u32, image::ExtendedColorType::Rgba8)
+                .map_err(|e| e.to_string()),
+            _ => {
+                // JPEG has no transparency: blend over white
+                let rgb: Vec<u8> = self
+                    .data
+                    .chunks_exact(4)
+                    .flat_map(|p| {
+                        let a = p[3] as u32;
+                        [0, 1, 2].map(|k| ((p[k] as u32 * a + 255 * (255 - a) + 127) / 255) as u8)
+                    })
+                    .collect();
+                image::codecs::jpeg::JpegEncoder::new_with_quality(file, 94)
+                    .encode(&rgb, self.w as u32, self.h as u32, image::ExtendedColorType::Rgb8)
+                    .map_err(|e| e.to_string())
+            }
+        }
+    }
+}
+
+/// A folder of 1024 px PNG tiles, written a band of rows at a time.
+struct TileSink {
+    dir: PathBuf,
+    stem: String,
+    w: usize,
+    h: usize,
+    band: Vec<u8>,
+    rows_in_band: usize,
+    band_index: usize,
+    written: Vec<(usize, usize, usize, usize)>,
+}
+
+const TILE: usize = 1024;
+
+impl TileSink {
+    fn flush_band(&mut self) -> Result<(), String> {
+        if self.rows_in_band == 0 {
+            return Ok(());
+        }
+        let cols = self.w.div_ceil(TILE);
+        for c in 0..cols {
+            let x0 = c * TILE;
+            let tw = TILE.min(self.w - x0);
+            let mut tile = Vec::with_capacity(tw * self.rows_in_band * 4);
+            for r in 0..self.rows_in_band {
+                let from = (r * self.w + x0) * 4;
+                tile.extend_from_slice(&self.band[from..from + tw * 4]);
+            }
+            let path = self.dir.join(format!("{}_x{}_y{}.png", self.stem, c, self.band_index));
+            let file = std::io::BufWriter::new(std::fs::File::create(&path).map_err(|e| format!("{}: {e}", path.display()))?);
+            let mut enc = png::Encoder::new(file, tw as u32, self.rows_in_band as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.set_compression(png::Compression::Fast);
+            let mut wr = enc.write_header().map_err(|e| e.to_string())?;
+            wr.write_image_data(&tile).map_err(|e| e.to_string())?;
+            self.written.push((c, self.band_index, tw, self.rows_in_band));
+        }
+        self.band.clear();
+        self.rows_in_band = 0;
+        self.band_index += 1;
+        Ok(())
+    }
+}
+
+impl Sink for TileSink {
+    fn rows(&mut self, rgba: &[u8], n: usize) -> Result<(), String> {
+        let mut done = 0;
+        while done < n {
+            let take = (TILE - self.rows_in_band).min(n - done);
+            self.band.extend_from_slice(&rgba[done * self.w * 4..(done + take) * self.w * 4]);
+            self.rows_in_band += take;
+            done += take;
+            if self.rows_in_band == TILE {
+                self.flush_band()?;
+            }
+        }
+        Ok(())
+    }
+    fn finish(mut self: Box<Self>) -> Result<(), String> {
+        self.flush_band()?;
+        let index = serde_json::json!({
+            "width": self.w,
+            "height": self.h,
+            "tile": TILE,
+            "columns": self.w.div_ceil(TILE),
+            "rows": self.h.div_ceil(TILE),
+            "tiles": self.written.iter().map(|(c, r, tw, th)| serde_json::json!({"file": format!("{}_x{}_y{}.png", self.stem, c, r), "x": c * TILE, "y": r * TILE, "w": tw, "h": th})).collect::<Vec<_>>(),
+        });
+        std::fs::write(self.dir.join(format!("{}_tiles.json", self.stem)), serde_json::to_string_pretty(&index).unwrap_or_default()).map_err(|e| e.to_string())
+    }
+}
+
+fn make_sink(path: &PathBuf, w: usize, h: usize, format: ExportFormat) -> Result<Box<dyn Sink>, String> {
+    match format {
+        ExportFormat::Png | ExportFormat::PngSmall => {
+            let file = std::io::BufWriter::new(std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?);
+            let mut enc = png::Encoder::new(file, w as u32, h as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.set_compression(if format == ExportFormat::PngSmall { png::Compression::High } else { png::Compression::Fast });
+            let wr = enc.write_header().map_err(|e| e.to_string())?;
+            Ok(Box::new(PngSink(wr.into_stream_writer().map_err(|e| e.to_string())?)))
+        }
+        ExportFormat::Tiles => {
+            let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "map".into());
+            let dir = path.with_extension("");
+            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            Ok(Box::new(TileSink { dir, stem, w, h, band: Vec::new(), rows_in_band: 0, band_index: 0, written: Vec::new() }))
+        }
+        ExportFormat::Webp | ExportFormat::Jpeg => {
+            if w * h > WHOLE_MAX_PX {
+                return Err(format!("{} px is too large for {}: use PNG or tiles", w * h, format.label()));
+            }
+            Ok(Box::new(WholeSink { path: path.clone(), w, h, format, data: Vec::with_capacity(w * h * 4) }))
+        }
+    }
+}
+
 /// Render the map at `scale` strip by strip and write one PNG per output. `progress` gets 0..1.
 pub fn export_strips(
     project: &Project,
@@ -230,9 +430,21 @@ pub fn export_strips(
     cancelled: &(dyn Fn() -> bool + Sync),
     progress: &mut dyn FnMut(f32),
 ) -> Result<(), String> {
+    export_strips_as(project, scale, outputs, ExportFormat::Png, cancelled, progress)
+}
+
+/// `export_strips` in a chosen file format.
+pub fn export_strips_as(
+    project: &Project,
+    scale: f32,
+    outputs: &[(PathBuf, ComposeOptions)],
+    format: ExportFormat,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    progress: &mut dyn FnMut(f32),
+) -> Result<(), String> {
     let passes = zone_passes(project);
     let many = passes.len() > 1;
-    export_with(&passes, scale, outputs, cancelled, progress, &mut |pi, plan, region| {
+    export_with(&passes, scale, outputs, format, cancelled, progress, &mut |pi, plan, region| {
         let project = &passes[pi];
         let mut st = stamp_region(project, plan, scale, region, cancelled).ok_or("cancelled")?;
         let layers = shade_region(project, plan, &mut st, cancelled, false, false).ok_or("cancelled")?;
@@ -250,9 +462,23 @@ pub fn export_strips_gpu(
     cancelled: &(dyn Fn() -> bool + Sync),
     progress: &mut dyn FnMut(f32),
 ) -> Result<(), String> {
+    export_strips_gpu_as(gpu, project, scale, outputs, ExportFormat::Png, cancelled, progress)
+}
+
+/// `export_strips_gpu` in a chosen file format.
+#[cfg(feature = "gpu")]
+pub fn export_strips_gpu_as(
+    gpu: &crate::gpu::Gpu,
+    project: &Project,
+    scale: f32,
+    outputs: &[(PathBuf, ComposeOptions)],
+    format: ExportFormat,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    progress: &mut dyn FnMut(f32),
+) -> Result<(), String> {
     let passes = zone_passes(project);
     let many = passes.len() > 1;
-    export_with(&passes, scale, outputs, cancelled, progress, &mut |pi, plan, region| {
+    export_with(&passes, scale, outputs, format, cancelled, progress, &mut |pi, plan, region| {
         let project = &passes[pi];
         let layers = gpu.render(project, plan, scale, region);
         Ok(outputs.iter().map(|(_, opts)| gpu.compose_rgba(&layers, &project.grading, layer_opts(*opts, many))).collect())
@@ -275,6 +501,7 @@ fn export_with(
     passes: &[Project],
     scale: f32,
     outputs: &[(PathBuf, ComposeOptions)],
+    format: ExportFormat,
     cancelled: &(dyn Fn() -> bool + Sync),
     progress: &mut dyn FnMut(f32),
     strip: &mut StripFn,
@@ -294,15 +521,9 @@ fn export_with(
     }
     let rows = ((STRIP_PX / w.max(1)).max(64)).div_ceil(4) * 4;
 
-    let mut writers = Vec::new();
+    let mut writers: Vec<Box<dyn Sink>> = Vec::new();
     for (path, _) in outputs {
-        let file = std::io::BufWriter::new(std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?);
-        let mut enc = png::Encoder::new(file, w as u32, h as u32);
-        enc.set_color(png::ColorType::Rgba);
-        enc.set_depth(png::BitDepth::Eight);
-        enc.set_compression(png::Compression::Fast);
-        let wr = enc.write_header().map_err(|e| e.to_string())?;
-        writers.push(wr.into_stream_writer().map_err(|e| e.to_string())?);
+        writers.push(make_sink(path, w, h, format)?);
     }
     let mut cy = 0;
     while cy < h {
@@ -331,13 +552,13 @@ fn export_with(
         }
         let skip = (cy - y0) * w * 4;
         for (rgba, wr) in images.iter().zip(writers.iter_mut()) {
-            wr.write_all(&rgba[skip..skip + core * w * 4]).map_err(|e| e.to_string())?;
+            wr.rows(&rgba[skip..skip + core * w * 4], core)?;
         }
         cy += core;
         progress(cy as f32 / h as f32);
     }
     for wr in writers {
-        wr.finish().map_err(|e| e.to_string())?;
+        wr.finish()?;
     }
     Ok(())
 }
