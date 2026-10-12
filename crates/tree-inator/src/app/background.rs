@@ -158,9 +158,9 @@ impl TreeApp {
     /// How the preview is composited: over the map colour, or with transparency when a picture sits under it.
     pub(super) fn preview_options(&self) -> ComposeOptions {
         if self.background_showing() {
-            ComposeOptions { shadows: true, shadow_only: false, background: None, premultiplied: true }
+            ComposeOptions { shadows: true, shadow_only: false, background: None, premultiplied: true, layers: forest_core::compose::ALL_LAYERS }
         } else {
-            ComposeOptions { shadows: true, shadow_only: false, background: Some(self.background), premultiplied: false }
+            ComposeOptions { shadows: true, shadow_only: false, background: Some(self.background), premultiplied: false, layers: forest_core::compose::ALL_LAYERS }
         }
     }
 }

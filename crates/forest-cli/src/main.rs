@@ -17,6 +17,8 @@ fn main() {
     let mut scale = 1.0f32;
     let mut background = false;
     let mut strips = false;
+    let mut variants = false;
+    let mut layers = false;
     let mut format = ExportFormat::Png;
     let mut over: Option<PathBuf> = None;
     let mut save: Option<PathBuf> = None;
@@ -43,6 +45,8 @@ fn main() {
             }
             "-bg" => background = true,
             "-strips" => strips = true,
+            "-variants" => variants = true,
+            "-layers" => layers = true,
             "-save" => {
                 i += 1;
                 save = Some(args[i].clone().into());
@@ -154,13 +158,29 @@ fn main() {
         }
     }
     let t = Instant::now();
-    if strips {
+    if strips || variants || layers {
         let opts = ComposeOptions { background: background.then_some([214.0 / 255.0, 205.0 / 255.0, 180.0 / 255.0]), ..Default::default() };
+        let mut outputs = vec![(out.clone(), opts)];
+        if variants {
+            // the same files the app's Export section writes: with shadows, without, and the ground shadow alone
+            let stem = out.with_extension("");
+            let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
+            outputs.push((PathBuf::from(format!("{}_noshadow.{ext}", stem.display())), ComposeOptions { shadows: false, ..opts }));
+            outputs.push((PathBuf::from(format!("{}_shadow.{ext}", stem.display())), ComposeOptions { shadows: true, shadow_only: true, ..opts }));
+        }
+        if layers {
+            // ground, underbrush and canopy on their own, without the ground shadow
+            let stem = out.with_extension("");
+            let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
+            for (name, mask) in forest_core::compose::LAYER_GROUPS {
+                outputs.push((PathBuf::from(format!("{}_{name}.{ext}", stem.display())), ComposeOptions { layers: mask, ..opts }));
+            }
+        }
         if gpu {
             let g = forest_core::gpu::Gpu::headless().expect("no usable GPU");
-            export_strips_gpu_as(&g, &project, scale, &[(out.clone(), opts)], format, &|| false, &mut |_| {}).expect("export");
+            export_strips_gpu_as(&g, &project, scale, &outputs, format, &|| false, &mut |_| {}).expect("export");
         } else {
-            export_strips_as(&project, scale, &[(out.clone(), opts)], format, &|| false, &mut |_| {}).expect("export");
+            export_strips_as(&project, scale, &outputs, format, &|| false, &mut |_| {}).expect("export");
         }
         println!("strips: {:.2}s", t.elapsed().as_secs_f32());
         println!("wrote {}", out.display());

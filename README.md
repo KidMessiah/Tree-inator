@@ -90,6 +90,8 @@ With no project a test shape is rendered.
 | `-chm FILE` | Write the canopy height map (16 bit, 1/256 render pixel per step). With `-out`, the picture is also rendered. |
 | `-trees FILE` | Write the final tree list as JSON. |
 | `-strokes FILE` | Replay brush strokes from a file. |
+| `-layers` | Also write the layers on their own: `NAME_ground.png` (haze and grass), `NAME_underbrush.png` (shrubs and pebbles) and `NAME_canopy.png` (forest crowns and lone trees). The ground shadow stays in `-variants`' `_shadow` file. Transparent without `-bg`. |
+| `-variants` | Write three files in one pass, like the app's Export section: `NAME.png` with shadows, `NAME_noshadow.png` and `NAME_shadow.png` (the ground shadow alone). Leave out `-bg` to keep them transparent. |
 | `-save FILE` | Write the project as it stands after `-theme` and `-over`. Without `-out`, nothing is rendered. |
 
 Examples (PowerShell, from the repository root):
@@ -198,7 +200,7 @@ An imported picture can sit under the forest as a reference. It is never exporte
 
 ### Export
 
-Export scale sets the output size (map size times scale). Variants: with shadows, without shadows (`_noshadow`), shadow only (`_shadow`). Formats:
+Export scale sets the output size (map size times scale). Variants: with shadows, without shadows (`_noshadow`), shadow only (`_shadow`), and the layers on their own (`_ground`, `_underbrush`, `_canopy`). Formats:
 
 | Format | Notes |
 | --- | --- |

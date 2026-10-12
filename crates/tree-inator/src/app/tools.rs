@@ -947,10 +947,9 @@ impl TreeApp {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Zones").strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("+ Group").on_hover_text("A new empty group").clicked() {
-                    let place = self.placement_group();
+                if ui.small_button("+ Group").on_hover_text("A new empty group at the top level. Right click a group for one inside it.").clicked() {
                     self.push_undo();
-                    self.group_sel = Some(self.project.add_group(place));
+                    self.group_sel = Some(self.project.add_group(None));
                     self.zone_sel = None;
                     self.prev_zone_sel = None;
                 }
@@ -1032,12 +1031,16 @@ impl TreeApp {
             let mut ui2 = ui.new_child(egui::UiBuilder::new().max_rect(edit));
             let mut text = label.clone();
             let te = ui2.add(egui::TextEdit::singleline(&mut text));
-            te.request_focus();
-            match id {
-                RowId::Zone(i) => self.project.shapes[i].name = text,
-                RowId::Group(g) => {
-                    if let Some(n) = self.project.group_mut(g) {
-                        n.name = text;
+            if !te.has_focus() && !te.lost_focus() {
+                te.request_focus();
+            }
+            if te.changed() {
+                match id {
+                    RowId::Zone(i) => self.project.shapes[i].name = text,
+                    RowId::Group(g) => {
+                        if let Some(n) = self.project.group_mut(g) {
+                            n.name = text;
+                        }
                     }
                 }
             }
@@ -1194,6 +1197,13 @@ impl TreeApp {
             RowId::Group(g) => {
                 if ui.button("Rename").clicked() {
                     self.renaming = Some(id);
+                    ui.close();
+                }
+                if ui.button("New group inside").clicked() {
+                    self.push_undo();
+                    self.group_sel = Some(self.project.add_group(Some(g)));
+                    self.zone_sel = None;
+                    self.prev_zone_sel = None;
                     ui.close();
                 }
                 if ui.button("Group it").clicked() {

@@ -20,6 +20,8 @@ pub struct Variants {
     pub main: bool,
     pub no_shadow: bool,
     pub shadow_only: bool,
+    /// Ground, underbrush and canopy as separate files.
+    pub layers: bool,
 }
 
 pub enum Msg {
@@ -144,7 +146,7 @@ pub fn spawn(rx: Receiver<Job>, tx: Sender<Msg>, latest: Arc<AtomicU64>, ctx: ef
 fn export(gpu: Option<&forest_core::gpu::Gpu>, p: &Project, scale: f32, path: &PathBuf, v: Variants, format: forest_core::render::ExportFormat, progress: &mut dyn FnMut(f32)) -> Result<Vec<PathBuf>, String> {
     let stem = path.with_extension("");
     let stem = stem.to_string_lossy();
-    let base = ComposeOptions { shadows: p.light.shadows, shadow_only: false, background: None, premultiplied: false };
+    let base = ComposeOptions { shadows: p.light.shadows, shadow_only: false, background: None, premultiplied: false, layers: forest_core::compose::ALL_LAYERS };
     // a tile export names a folder, the other formats a file with their own extension
     let ext = format.extension().unwrap_or("png");
     let mut outputs = Vec::new();
@@ -156,6 +158,11 @@ fn export(gpu: Option<&forest_core::gpu::Gpu>, p: &Project, scale: f32, path: &P
     }
     if v.shadow_only {
         outputs.push((PathBuf::from(format!("{stem}_shadow.{ext}")), ComposeOptions { shadows: true, shadow_only: true, ..base }));
+    }
+    if v.layers {
+        for (name, mask) in forest_core::compose::LAYER_GROUPS {
+            outputs.push((PathBuf::from(format!("{stem}_{name}.{ext}")), ComposeOptions { layers: mask, ..base }));
+        }
     }
     match gpu {
         Some(g) => forest_core::render::export_strips_gpu_as(g, p, scale, &outputs, format, &|| false, progress)?,

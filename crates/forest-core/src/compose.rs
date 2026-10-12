@@ -13,13 +13,22 @@ pub struct ComposeOptions {
     pub background: Option<[f32; 3]>,
     /// Colour multiplied by alpha, the way the editor's texture draws it. For PNG leave this off.
     pub premultiplied: bool,
+    /// Which layers are drawn, one bit per `LayerKind::index`. All of them by default.
+    pub layers: u8,
 }
 
 impl Default for ComposeOptions {
     fn default() -> Self {
-        ComposeOptions { shadows: true, shadow_only: false, background: None, premultiplied: false }
+        ComposeOptions { shadows: true, shadow_only: false, background: None, premultiplied: false, layers: ALL_LAYERS }
     }
 }
+
+pub const ALL_LAYERS: u8 = 0x7F;
+
+/// The layers an export can write on their own, without the ground shadow, which has its own file:
+/// name suffix and layer mask. Ground is haze and grass, underbrush is shrubs and pebbles, canopy is
+/// the forest crowns and the lone trees.
+pub const LAYER_GROUPS: [(&str, u8); 3] = [("ground", 0b0000101), ("underbrush", 0b1001000), ("canopy", 0b0110000)];
 
 fn grade(c: [f32; 3], g: &LayerGrade, hue_rot: Option<(f32, f32)>) -> [f32; 3] {
     let mut c = [c[0] * g.tint[0], c[1] * g.tint[1], c[2] * g.tint[2]];
@@ -73,7 +82,7 @@ pub fn compose(r: &RenderLayers, grading: &Grading, opts: ComposeOptions) -> Vec
             }
             for (li, l) in r.layers.iter().enumerate() {
                 let g = grades[li];
-                if !g.visible {
+                if !g.visible || opts.layers & (1 << l.kind.index()) == 0 {
                     continue;
                 }
                 let Some(p) = l.get(x, y) else { continue };

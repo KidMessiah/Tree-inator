@@ -1,3 +1,4 @@
 /target
 *.png.tmp
 /non-essential
+/release

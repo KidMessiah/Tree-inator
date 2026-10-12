@@ -982,7 +982,7 @@ impl Gpu {
         let mut put = |k: usize, gr: &LayerGrade| {
             let on = gr.hue.abs() > 0.01;
             let a = gr.hue.to_radians();
-            v[3 * k] = [gr.visible as u8 as f32, gr.opacity, on as u8 as f32, a.cos()];
+            v[3 * k] = [(gr.visible && (k >= 7 || opts.layers & (1 << k) != 0)) as u8 as f32, gr.opacity, on as u8 as f32, a.cos()];
             v[3 * k + 1] = [a.sin(), gr.saturation, gr.brightness, gr.contrast];
             v[3 * k + 2] = [gr.tint[0], gr.tint[1], gr.tint[2], gr.receive_shadow as u8 as f32];
         };

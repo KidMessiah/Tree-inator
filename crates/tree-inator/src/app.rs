@@ -251,7 +251,7 @@ impl TreeApp {
             show_outlines: true,
             selected_layer: LayerKind::Canopy.index(),
             export_scale: 1.0,
-            variants: Variants { main: true, no_shadow: false, shadow_only: false },
+            variants: Variants { main: true, no_shadow: false, shadow_only: false, layers: false },
             export_format: forest_core::render::ExportFormat::Png,
             theme: None,
             gpu,
@@ -629,7 +629,7 @@ impl TreeApp {
                     }
                 }
                 // zones with their own settings sit over it, with transparency
-                let over = ComposeOptions { shadows: true, shadow_only: false, background: None, premultiplied: true };
+                let over = ComposeOptions { shadows: true, shadow_only: false, background: None, premultiplied: true, layers: forest_core::compose::ALL_LAYERS };
                 for e in self.extra_gpu.iter_mut() {
                     let before = e.image.as_ref().map(|i| (i.w, i.h));
                     g.compose_image(&e.layers, &self.project.grading, over, &mut e.image);
@@ -650,7 +650,7 @@ impl TreeApp {
                     Some(t) => t.set(img, egui::TextureOptions::LINEAR),
                     None => self.texture = Some(ctx.load_texture("preview", img, egui::TextureOptions::LINEAR)),
                 }
-                let over = ComposeOptions { shadows: true, shadow_only: false, background: None, premultiplied: true };
+                let over = ComposeOptions { shadows: true, shadow_only: false, background: None, premultiplied: true, layers: forest_core::compose::ALL_LAYERS };
                 for (l, tex) in self.extra_cpu.iter_mut() {
                     let rgba = compose(l, &self.project.grading, over);
                     let img = egui::ColorImage::from_rgba_premultiplied([l.w, l.h], &rgba);
@@ -1005,6 +1005,7 @@ impl TreeApp {
             ui.checkbox(&mut self.variants.main, "With shadows");
             ui.checkbox(&mut self.variants.no_shadow, "Without shadows (_noshadow)");
             ui.checkbox(&mut self.variants.shadow_only, "Ground shadow only (_shadow)");
+            ui.checkbox(&mut self.variants.layers, "Layers: ground, underbrush, canopy (_ground, _underbrush, _canopy)");
             egui::ComboBox::from_label("Format").selected_text(self.export_format.label()).show_ui(ui, |ui| {
                 for f in forest_core::render::ExportFormat::ALL {
                     ui.selectable_value(&mut self.export_format, f, f.label());
@@ -1161,7 +1162,8 @@ impl TreeApp {
                         }
                     }
                     Tool::Polygon | Tool::Line => {
-                        if resp.clicked_by(PointerButton::Primary) {
+                        // a press that moved a little counts as a drag in egui, so take its release as a click too
+                        if resp.clicked_by(PointerButton::Primary) || resp.drag_stopped_by(PointerButton::Primary) {
                             if let Some(p) = resp.interact_pointer_pos() {
                                 let mut m = self.screen_to_map(origin, p);
                                 if self.snap {
