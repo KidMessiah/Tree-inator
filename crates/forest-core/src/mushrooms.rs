@@ -1,4 +1,4 @@
-//! Baked mushroom sprites (non-essential/research/scripts/bake_mushrooms.py): five seeds of five kinds, seen from above.
+//! Baked mushroom sprites (generated offline): five seeds of five kinds, seen from above.
 //! They are ordinary tree sprites, so the engine shades, shadows and colours them like trees: the species ramp
 //! colours the cap, and the species bark colour paints the warts.
 

@@ -370,7 +370,7 @@ pub fn theme_giants(name: &str) -> f32 {
     }
 }
 
-/// Themes made from aerial lidar and hyperspectral imagery (non-essential/research): species colours, ground colours and
+/// Themes made from aerial lidar and hyperspectral imagery: species colours, ground colours and
 /// the stand's own structure settings, read from `assets/satellite_themes.json`.
 fn satellite_data() -> &'static serde_json::Value {
     static DATA: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();

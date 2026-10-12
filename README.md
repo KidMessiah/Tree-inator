@@ -30,7 +30,6 @@ crates/forest-core    the engine: everything that makes the picture
 crates/tree-inator    the desktop app (egui), render worker thread, tuning panel
 crates/forest-cli     command line renderer
 tools/                small scripts for previewing tree types and themes, and for baking theme cards
-non-essential/        research data and scripts, backups, design mocks and old material; not needed to build or run
 ```
 
 Inside `forest-core/src`:
